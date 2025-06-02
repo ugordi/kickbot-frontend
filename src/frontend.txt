@@ -1,0 +1,8 @@
+frontend/
+├── src/
+│   ├── App.jsx              # Yayıncı paneli
+│   ├── api.js               # Backend çağrıları
+│   ├── components/
+│   │   └── Table.jsx        # Kullanıcı puan tablosu
+│   │   └── WinnerBox.jsx    # Kazanan gösterimi
+│   └── config.js            # Backend URL, yayıncı ID mock
