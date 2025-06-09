@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
 import "./App.css";
+import { BACKEND_URL } from "./config";
 
 function BetPanel() {
   const [streamerId] = useState(localStorage.getItem("streamer_id"));
@@ -15,7 +16,7 @@ function BetPanel() {
   const [remainingTime, setRemainingTime] = useState(null);
 
   const fetchActiveBet = async () => {
-    const res = await axios.get(`http://localhost:5000/api/bet/active/${streamerId}`).catch(() => null);
+    const res = await axios.get(`${BACKEND_URL}/bet/active/${streamerId}`).catch(() => null);
     setActiveBet(res?.data || null);
   };
 
@@ -27,13 +28,13 @@ function BetPanel() {
   }, [streamerId]);
 
   const fetchHistory = async () => {
-    const res = await axios.get(`http://localhost:5000/api/history/${streamerId}`);
+    const res = await axios.get(`${BACKEND_URL}/history/${streamerId}`);
     setHistory(res.data);
   };
 
   const createBet = async () => {
     if (!title.trim()) return alert("Başlık boş olamaz.");
-    await axios.post("http://localhost:5000/api/bet/create", {
+    await axios.post(`${BACKEND_URL}/bet/create`, {
       streamer_id: streamerId,
       title,
       max_bet: maxBet,
@@ -63,7 +64,7 @@ function BetPanel() {
 
 
   const resolveBet = async (winner) => {
-    await axios.post("http://localhost:5000/api/bet/resolve", {
+    await axios.post(`${BACKEND_URL}/bet/resolve`, {
       streamer_id: streamerId,
       winner,
     });
@@ -72,7 +73,7 @@ function BetPanel() {
   };
 
   const cancelBet = async () => {
-    await axios.post("http://localhost:5000/api/bet/cancel", {
+    await axios.post(`${BACKEND_URL}/bet/cancel`, {
       streamer_id: streamerId,
     });
     setMessage("⛔ Bet iptal edildi, puanlar iade edildi.");

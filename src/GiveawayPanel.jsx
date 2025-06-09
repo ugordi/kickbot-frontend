@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
 import "./App.css";
+import { BACKEND_URL } from "./config";
+
 
 function GiveawayPanel() {
   const [streamerId] = useState(localStorage.getItem("streamer_id"));
@@ -17,9 +19,9 @@ function GiveawayPanel() {
   const navigate = useNavigate();
 
   const fetchEntries = async () => {
-    const res = await axios.get(`http://localhost:5000/api/giveaway/${streamerId}`);
+    const res = await axios.get(`${BACKEND_URL}/giveaway/${streamerId}`);
     if (res.data && res.data.id) {
-      const entryRes = await axios.get(`http://localhost:5000/api/giveaway/entries/${res.data.id}`);
+      const entryRes = await axios.get(`${BACKEND_URL}/giveaway/entries/${res.data.id}`);
       setEntries(entryRes.data);
     } else {
       setEntries([]);
@@ -27,12 +29,12 @@ function GiveawayPanel() {
   };
 
   const fetchAllGiveaways = async () => {
-    const res = await axios.get(`http://localhost:5000/api/giveaway/list/${streamerId}`);
+    const res = await axios.get(`${BACKEND_URL}/giveaway/list/${streamerId}`);
     setAllGiveaways(res.data);
   };
 
   const createGiveaway = async () => {
-    await axios.post("http://localhost:5000/api/giveaway/create", {
+    await axios.post(`${BACKEND_URL}/giveaway/create`, {
       streamer_id: streamerId,
       title,
       command,
@@ -46,7 +48,7 @@ function GiveawayPanel() {
   const deactivateGiveaway = async (id) => {
     if (!window.confirm("Bu çekilişi kapatmak istediğinize emin misiniz?")) return;
     try {
-      await axios.post("http://localhost:5000/api/giveaway/deactivate", {
+      await axios.post(`${BACKEND_URL}/giveaway/deactivate`, {
         giveaway_id: id
       });
       fetchAllGiveaways();
@@ -57,14 +59,14 @@ function GiveawayPanel() {
 
   const draw = async () => {
     try {
-      const res = await axios.post("http://localhost:5000/api/giveaway/draw", {
+      const res = await axios.post(`${BACKEND_URL}/giveaway/draw`, {
         streamer_id: streamerId
       });
 
       setWinner(res.data.winner);
 
       if (res.data.giveaway_id) {
-        const entryRes = await axios.get(`http://localhost:5000/api/giveaway/entries/${res.data.giveaway_id}`);
+        const entryRes = await axios.get(`${BACKEND_URL}/giveaway/entries/${res.data.giveaway_id}`);
         setEntries(entryRes.data);
       }
 

@@ -2,7 +2,7 @@
 
 import axios from "axios";
 
-const API_BASE = "http://localhost:5000/api";
+const API_BASE = "https://kickbot-5q0u.onrender.com/api";
 
 // Kullanıcı puanları
 export const getPoints = (streamer_id) =>

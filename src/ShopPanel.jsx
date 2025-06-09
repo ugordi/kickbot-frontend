@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
 import "./App.css";
+import { BACKEND_URL } from "./config";
 
 function ShopPanel() {
   const [streamerId] = useState(localStorage.getItem("streamer_id"));
@@ -14,18 +15,18 @@ function ShopPanel() {
   const navigate = useNavigate();
 
   const fetchItems = async () => {
-    const res = await axios.get(`http://localhost:5000/api/shop/${streamerId}`);
+    const res = await axios.get(`${BACKEND_URL}/shop/${streamerId}`);
     setItems(res.data);
   };
 
   const fetchBuyers = async (itemId) => {
-    const res = await axios.get(`http://localhost:5000/api/shop/buyers/${itemId}`);
+    const res = await axios.get(`${BACKEND_URL}/shop/buyers/${itemId}`);
     setBuyers((prev) => ({ ...prev, [itemId]: res.data }));
   };
 
   const createItem = async () => {
     if (!name || !command) return alert("Tüm alanları doldurun");
-    await axios.post("http://localhost:5000/api/shop/create", {
+    await axios.post(`${BACKEND_URL}/shop/create`, {
       streamer_id: streamerId,
       name,
       command,
@@ -46,7 +47,7 @@ function ShopPanel() {
     if (!confirmDelete) return;
 
       try {
-        await axios.delete(`http://localhost:5000/api/shop/${id}`);
+        await axios.delete(`${BACKEND_URL}/shop/${id}`);
         fetchItems(); // Listeyi güncelle
       } catch (err) {
         alert("Silme işlemi başarısız.");
