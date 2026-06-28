@@ -4,7 +4,6 @@ import { BACKEND_URL } from "./config";
 
 
 const CLIENT_ID = "01JW4J0KESK96WVH0WEE2FGFCY";
-const CLIENT_SECRET = "15f602dbebb70fea4ee7f007e26e13d0f77d60ebdef8ed8b65a261912679e4b3";
 const REDIRECT_URI = "https://212sbot.com/login";
 
 function generateCodeVerifier() {
@@ -52,15 +51,12 @@ function Login() {
         code_verifier,
         redirect_uri: REDIRECT_URI,
         client_id: CLIENT_ID,
-        client_secret: CLIENT_SECRET,
       });
 
-      axios.post(`https://kickbot-5q0u.onrender.com/auth/callback`, {
+      axios.post(`https://212sbot.up.railway.app/auth/callback`, {
         code,
         code_verifier,
         redirect_uri: REDIRECT_URI,
-        client_id: CLIENT_ID,
-        client_secret: CLIENT_SECRET,
       })
         .then(res => {
           localStorage.setItem("access_token", res.data.access_token);
