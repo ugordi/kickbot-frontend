@@ -5,181 +5,269 @@ import "./App.css";
 import { BACKEND_URL } from "./config";
 
 function BetPanel() {
-  const [streamerId] = useState(localStorage.getItem("streamer_id"));
-
-  // ✅ Default başlık
-  const [title, setTitle] = useState("Win or Lose ? ");
-
-  const [maxBet, setMaxBet] = useState(0);
-  const [activeBet, setActiveBet] = useState(null);
-  const [message, setMessage] = useState("");
   const navigate = useNavigate();
+
+  const [streamerId] = useState(
+    localStorage.getItem("streamer_id")
+  );
+
+  const [title, setTitle] = useState("Win or Lose ?");
+  const [maxBet, setMaxBet] = useState(1000);
+  const [duration, setDuration] = useState(120);
+
+  const [activeBet, setActiveBet] = useState(null);
   const [history, setHistory] = useState([]);
-  const [duration, setDuration] = useState(60);
   const [remainingTime, setRemainingTime] = useState(null);
 
-  const quickMaxBets = [1000, 2000, 5000, 10000, 20000];
+  const [message, setMessage] = useState("");
+  const [loadingAction, setLoadingAction] = useState("");
+
+  const quickMaxBets = [
+    1000,
+    2000,
+    5000,
+    10000,
+    20000,
+  ];
 
   const fetchActiveBet = async () => {
-    const res = await axios
-      .get(`${BACKEND_URL}/bet/active/${streamerId}`)
-      .catch(() => null);
+    if (!streamerId) {
+      setActiveBet(null);
+      return;
+    }
 
-    setActiveBet(res?.data || null);
+    try {
+      const response = await axios.get(
+        `${BACKEND_URL}/bet/active/${streamerId}`
+      );
+
+      setActiveBet(response.data || null);
+    } catch (error) {
+      console.error("Aktif bet alınamadı:", error);
+      setActiveBet(null);
+    }
   };
 
   const fetchHistory = async () => {
+    if (!streamerId) {
+      setHistory([]);
+      return;
+    }
+
     try {
-      const res = await axios.get(`${BACKEND_URL}/history/${streamerId}`);
-      setHistory(res.data);
+      const response = await axios.get(
+        `${BACKEND_URL}/history/${streamerId}`
+      );
+
+      setHistory(
+        Array.isArray(response.data)
+          ? response.data
+          : []
+      );
     } catch (error) {
       console.error("Bet geçmişi alınamadı:", error);
+      setHistory([]);
     }
   };
 
   useEffect(() => {
-    if (streamerId) {
-      fetchActiveBet();
-      fetchHistory();
+    if (!streamerId) {
+      setMessage(
+        "Yayıncı bilgisi bulunamadı. Tekrar giriş yapın."
+      );
+      return;
     }
+
+    fetchActiveBet();
+    fetchHistory();
   }, [streamerId]);
 
+  useEffect(() => {
+    if (
+      !activeBet ||
+      !activeBet.created_at ||
+      !activeBet.duration_seconds
+    ) {
+      setRemainingTime(null);
+      return undefined;
+    }
+
+    const createdAt = new Date(
+      activeBet.created_at
+    ).getTime();
+
+    const durationMilliseconds =
+      Number(activeBet.duration_seconds) * 1000;
+
+    const endTime =
+      createdAt + durationMilliseconds;
+
+    const updateTimer = () => {
+      const difference = Math.max(
+        0,
+        Math.floor(
+          (endTime - Date.now()) / 1000
+        )
+      );
+
+      setRemainingTime(difference);
+
+      return difference;
+    };
+
+    updateTimer();
+
+    const timer = setInterval(() => {
+      const difference = updateTimer();
+
+      if (difference === 0) {
+        clearInterval(timer);
+      }
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [activeBet]);
+
   const createBet = async () => {
-    if (!title.trim()) {
-      return alert("Başlık boş olamaz.");
+    const cleanTitle = title.trim();
+
+    if (!streamerId) {
+      setMessage("Yayıncı bilgisi bulunamadı.");
+      return;
     }
 
-    if (!maxBet || maxBet <= 0) {
-      return alert("Geçerli bir maksimum bet miktarı girin.");
+    if (!cleanTitle) {
+      setMessage("Bet başlığı boş olamaz.");
+      return;
     }
 
-    if (!duration || duration <= 0) {
-      return alert("Geçerli bir süre girin.");
+    if (
+      !Number.isFinite(maxBet) ||
+      maxBet <= 0
+    ) {
+      setMessage(
+        "Geçerli bir maksimum bet miktarı girin."
+      );
+      return;
+    }
+
+    if (
+      !Number.isFinite(duration) ||
+      duration <= 0
+    ) {
+      setMessage(
+        "Geçerli bir bet süresi girin."
+      );
+      return;
     }
 
     try {
-      await axios.post(`${BACKEND_URL}/bet/create`, {
-        streamer_id: streamerId,
-        title,
-        max_bet: maxBet,
-        duration_seconds: duration,
-      });
+      setLoadingAction("create");
+      setMessage("");
 
-      setTitle("Win or Lose ? ");
-      setMaxBet(1000);
-      setMessage("🚀 Bet başlatıldı.");
-
-      await fetchActiveBet();
-      await fetchHistory();
-    } catch (error) {
-      console.error("Bet oluşturma hatası:", error);
-
-      alert(
-        error.response?.data?.error ||
-          "Bet oluşturulurken bir hata oluştu."
+      await axios.post(
+        `${BACKEND_URL}/bet/create`,
+        {
+          streamer_id: streamerId,
+          title: cleanTitle,
+          max_bet: maxBet,
+          duration_seconds: duration,
+        }
       );
+
+      setTitle("Win or Lose ?");
+      setMaxBet(1000);
+      setDuration(120);
+      setMessage(
+        "Yeni bet başarıyla başlatıldı."
+      );
+
+      await Promise.all([
+        fetchActiveBet(),
+        fetchHistory(),
+      ]);
+    } catch (error) {
+      console.error(
+        "Bet oluşturma hatası:",
+        error
+      );
+
+      setMessage(
+        error.response?.data?.error ||
+          "Bet oluşturulamadı."
+      );
+    } finally {
+      setLoadingAction("");
     }
   };
 
-  useEffect(() => {
-    if (activeBet && activeBet.created_at && activeBet.duration_seconds) {
-      const createdAt = new Date(activeBet.created_at).getTime();
-      const endAt = createdAt + activeBet.duration_seconds * 1000;
-
-      const updateRemainingTime = () => {
-        const now = Date.now();
-        const diff = Math.max(0, Math.floor((endAt - now) / 1000));
-
-        setRemainingTime(diff);
-
-        return diff;
-      };
-
-      updateRemainingTime();
-
-      const interval = setInterval(() => {
-        const diff = updateRemainingTime();
-
-        if (diff === 0) {
-          clearInterval(interval);
-        }
-      }, 1000);
-
-      return () => clearInterval(interval);
+  const resolveBet = async (winner) => {
+    if (!streamerId || !activeBet) {
+      return;
     }
 
-    setRemainingTime(null);
-  }, [activeBet]);
-
-  const resolveBet = async (winner) => {
     try {
-      await axios.post(`${BACKEND_URL}/bet/resolve`, {
-        streamer_id: streamerId,
-        winner,
-      });
-
-      setMessage(
-        winner === 1
-          ? "✅ WIN seçildi. Kazananlara ödüller dağıtıldı."
-          : "❌ LOSE seçildi. Kazananlara ödüller dağıtıldı."
+      setLoadingAction(
+        winner === 1 ? "win" : "lose"
       );
+
+      setMessage("");
+
+      await axios.post(
+        `${BACKEND_URL}/bet/resolve`,
+        {
+          streamer_id: streamerId,
+          winner,
+        }
+      );
+
+      if (winner === 1) {
+        setMessage(
+          "WIN kazandı. Ödüller dağıtıldı."
+        );
+      } else {
+        setMessage(
+          "LOSE kazandı. Ödüller dağıtıldı."
+        );
+      }
 
       setActiveBet(null);
       setRemainingTime(null);
 
       await fetchHistory();
     } catch (error) {
-      console.error("Bet sonuçlandırma hatası:", error);
-
-      alert(
-        error.response?.data?.error ||
-          "Bet sonuçlandırılırken bir hata oluştu."
+      console.error(
+        "Bet sonuçlandırma hatası:",
+        error
       );
+
+      setMessage(
+        error.response?.data?.error ||
+          "Bet sonuçlandırılamadı."
+      );
+    } finally {
+      setLoadingAction("");
     }
   };
 
   const cancelBet = async () => {
-    const confirmed = window.confirm(
-      "Bet iptal edilecek ve yatırılan bütün puanlar geri verilecek. Emin misiniz?"
-    );
-
-    if (!confirmed) return;
-
-    try {
-      await axios.post(`${BACKEND_URL}/bet/cancel`, {
-        streamer_id: streamerId,
-      });
-
-      setMessage("⛔ Bet iptal edildi, puanlar iade edildi.");
-      setActiveBet(null);
-      setRemainingTime(null);
-
-      await fetchHistory();
-    } catch (error) {
-      console.error("Bet iptal hatası:", error);
-
-      alert(
-        error.response?.data?.error ||
-          "Bet iptal edilirken bir hata oluştu."
-      );
+    if (!streamerId || !activeBet) {
+      return;
     }
-  };
-
-  // ✅ Herkes yatırdığı puanı kaybeder
-  const houseWinBet = async () => {
-    const confirmed = window.confirm(
-      "Bu işlemde WIN ve LOSE oynayan herkes yatırdığı puanı kaybedecek. Emin misiniz?"
-    );
-
-    if (!confirmed) return;
 
     try {
-      await axios.post(`${BACKEND_URL}/bet/housewin`, {
-        streamer_id: streamerId,
-      });
+      setLoadingAction("cancel");
+      setMessage("");
+
+      await axios.post(
+        `${BACKEND_URL}/bet/cancel`,
+        {
+          streamer_id: streamerId,
+        }
+      );
 
       setMessage(
-        "🏦 Kasa kazandı. Bahse katılan herkes yatırdığı puanı kaybetti."
+        "Bet iptal edildi. Puanlar geri verildi."
       );
 
       setActiveBet(null);
@@ -187,214 +275,458 @@ function BetPanel() {
 
       await fetchHistory();
     } catch (error) {
-      console.error("Kasa kazandı hatası:", error);
-
-      alert(
-        error.response?.data?.error ||
-          "Bet kasa kazandı olarak sonuçlandırılamadı."
+      console.error(
+        "Bet iptal hatası:",
+        error
       );
+
+      setMessage(
+        error.response?.data?.error ||
+          "Bet iptal edilemedi."
+      );
+    } finally {
+      setLoadingAction("");
     }
   };
 
+  const houseWinBet = async () => {
+    if (!streamerId || !activeBet) {
+      return;
+    }
+
+    try {
+      setLoadingAction("house");
+      setMessage("");
+
+      /*
+        Onay penceresi yok.
+        Butona basıldığı anda doğrudan çalışır.
+      */
+      await axios.post(
+        `${BACKEND_URL}/bet/housewin`,
+        {
+          streamer_id: streamerId,
+        }
+      );
+
+      setMessage(
+        "Herkes kaybetti. Yatırılan puanlar geri verilmedi."
+      );
+
+      setActiveBet(null);
+      setRemainingTime(null);
+
+      await fetchHistory();
+    } catch (error) {
+      console.error(
+        "Herkes kaybetsin hatası:",
+        error
+      );
+
+      setMessage(
+        error.response?.data?.error ||
+          "Bet sonuçlandırılamadı."
+      );
+    } finally {
+      setLoadingAction("");
+    }
+  };
+
+  const getHistoryResult = (winner) => {
+    if (winner === 1) {
+      return {
+        text: "WIN Kazandı",
+        className: "bet-result-win",
+      };
+    }
+
+    if (winner === 2) {
+      return {
+        text: "LOSE Kazandı",
+        className: "bet-result-lose",
+      };
+    }
+
+    if (winner === 0) {
+      return {
+        text: "Herkes Kaybetti",
+        className: "bet-result-house",
+      };
+    }
+
+    return {
+      text: "Bet İptal Edildi",
+      className: "bet-result-cancel",
+    };
+  };
+
+  const isLoading =
+    loadingAction !== "";
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-900 via-purple-700 to-purple-800 text-white p-6 font-sans">
-      <div className="max-w-3xl mx-auto">
-        <h1 className="text-3xl font-bold mb-6 text-center">
-          💰 Bet Paneli
-        </h1>
+    <div className="bet-page">
+      <div className="bet-container">
+        <header className="bet-header">
+          <div className="bet-header-icon">
+            💰
+          </div>
+
+          <h1>Bet Paneli</h1>
+
+          <p>
+            Yeni bahis oluştur, sonucu belirle
+            ve geçmiş bahisleri görüntüle.
+          </p>
+        </header>
 
         <button
+          type="button"
+          className="bet-back-button"
           onClick={() => navigate("/")}
-          className="elite-button-purple mb-6"
         >
-          ⬅️ Ana Panele Dön
+          <span>←</span>
+          Ana Panele Dön
         </button>
 
-        <div className="bg-purple-950 border border-purple-800 rounded-xl p-6 mb-8">
-          <h2 className="text-xl font-semibold mb-4">
-            🎯 Yeni Bet Oluştur
-          </h2>
+        <section className="bet-card">
+          <div className="bet-section-title">
+            <div className="bet-section-icon">
+              🎯
+            </div>
 
-          <input
-            type="text"
-            placeholder="Bet Başlığı (örn: Bu maçı kazanır mı?)"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            className="px-3 py-2 rounded bg-purple-900 text-white border border-purple-700 w-full mb-4"
-          />
+            <div>
+              <h2>Yeni Bet Oluştur</h2>
 
-          <div className="flex flex-col sm:flex-row gap-4 items-center mb-2">
-            <label className="text-sm font-medium text-white">
-              Max Bet:
+              <p>
+                Bahis bilgilerini belirleyerek
+                yeni bir bet başlat.
+              </p>
+            </div>
+          </div>
+
+          <div className="bet-form-group">
+            <label htmlFor="bet-title">
+              Bet Başlığı
             </label>
 
             <input
-              type="number"
-              placeholder="örn: 1000"
-              value={maxBet}
-              onChange={(e) =>
-                setMaxBet(parseInt(e.target.value || "0", 10))
+              id="bet-title"
+              type="text"
+              value={title}
+              placeholder="Örnek: Bu maçı kazanır mı?"
+              onChange={(event) =>
+                setTitle(event.target.value)
               }
-              className="w-32 px-3 py-2 rounded bg-purple-900 text-white border border-purple-700"
-            />
-
-            <label className="text-sm font-medium text-white">
-              Süre (sn):
-            </label>
-
-            <input
-              type="number"
-              placeholder="örn: 60"
-              value={duration}
-              onChange={(e) =>
-                setDuration(parseInt(e.target.value || "0", 10))
-              }
-              className="w-32 px-3 py-2 rounded bg-purple-900 text-white border border-purple-700"
             />
           </div>
 
-          <div className="flex flex-wrap gap-4 mt-2 mb-6">
-            {quickMaxBets.map((amt) => {
-              const selected = maxBet === amt;
+          <div className="bet-form-grid">
+            <div className="bet-form-group">
+              <label htmlFor="max-bet">
+                Maksimum Bet
+              </label>
 
-              return (
-                <button
-                  key={amt}
-                  type="button"
-                  onClick={() => setMaxBet(amt)}
-                  className={`
-                    min-w-[130px]
-                    px-6 py-3
-                    text-base font-semibold
-                    rounded-xl
-                    border-2
-                    transition-all
-                    shadow-lg
-                    ${
-                      selected
-                        ? "bg-white text-purple-900 border-white scale-105"
-                        : "bg-purple-900 text-white border-purple-700 hover:bg-purple-800 hover:scale-105"
+              <div className="bet-input-wrapper">
+                <input
+                  id="max-bet"
+                  type="number"
+                  min="1"
+                  value={maxBet}
+                  onChange={(event) =>
+                    setMaxBet(
+                      Number(
+                        event.target.value
+                      )
+                    )
+                  }
+                />
+
+                <span>PUAN</span>
+              </div>
+            </div>
+
+            <div className="bet-form-group">
+              <label htmlFor="bet-duration">
+                Bet Süresi
+              </label>
+
+              <div className="bet-input-wrapper">
+                <input
+                  id="bet-duration"
+                  type="number"
+                  min="1"
+                  value={duration}
+                  onChange={(event) =>
+                    setDuration(
+                      Number(
+                        event.target.value
+                      )
+                    )
+                  }
+                />
+
+                <span>SANİYE</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="bet-quick-section">
+            <p>Hızlı Maksimum Bet</p>
+
+            <div className="bet-quick-grid">
+              {quickMaxBets.map(
+                (amount) => (
+                  <button
+                    type="button"
+                    key={amount}
+                    className={
+                      maxBet === amount
+                        ? "bet-quick-button active"
+                        : "bet-quick-button"
                     }
-                  `}
-                >
-                  {amt.toLocaleString("tr-TR")} Puan
-                </button>
-              );
-            })}
+                    onClick={() =>
+                      setMaxBet(amount)
+                    }
+                  >
+                    {amount.toLocaleString(
+                      "tr-TR"
+                    )}
+                  </button>
+                )
+              )}
+            </div>
           </div>
 
           <button
+            type="button"
+            className="bet-create-button"
             onClick={createBet}
-            className="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-6 py-2 rounded-xl shadow-lg"
+            disabled={isLoading}
           >
-            🚀 Bet Başlat
+            {loadingAction === "create"
+              ? "Bet Başlatılıyor..."
+              : "🚀 Bet Başlat"}
           </button>
-        </div>
+        </section>
 
         {activeBet && (
-          <div className="bg-purple-950 border border-purple-800 rounded-xl p-6 mb-8">
-            <h2 className="text-xl font-semibold mb-4">
-              📢 Aktif Bet
-            </h2>
+          <section className="bet-card bet-active-card">
+            <div className="bet-active-header">
+              <div className="bet-section-title">
+                <div className="bet-section-icon active">
+                  📢
+                </div>
 
-            <p className="mb-2 text-purple-300 font-medium">
-              {activeBet.title}
-            </p>
+                <div>
+                  <h2>Aktif Bet</h2>
 
-            <p className="mb-4 text-sm text-purple-400">
-              İzleyiciler <code>!win [puan]</code> veya{" "}
-              <code>!lose [puan]</code> yazarak katılır.
-            </p>
+                  <p>
+                    Bahis şu anda sonuçlandırılmayı
+                    bekliyor.
+                  </p>
+                </div>
+              </div>
 
-            {remainingTime !== null && (
-              <p className="text-sm text-yellow-400 font-semibold mb-4">
-                🕒 Kalan süre: {remainingTime} saniye
+              {remainingTime !== null && (
+                <div
+                  className={
+                    remainingTime === 0
+                      ? "bet-timer expired"
+                      : remainingTime <= 10
+                      ? "bet-timer warning"
+                      : "bet-timer"
+                  }
+                >
+                  <span>🕒</span>
+
+                  {remainingTime === 0
+                    ? "Süre doldu"
+                    : `${remainingTime} saniye`}
+                </div>
+              )}
+            </div>
+
+            <div className="bet-active-info">
+              <h3>{activeBet.title}</h3>
+
+              <p>
+                İzleyiciler{" "}
+                <code className="bet-code-win">
+                  !win [puan]
+                </code>{" "}
+                veya{" "}
+                <code className="bet-code-lose">
+                  !lose [puan]
+                </code>{" "}
+                yazarak katılır.
               </p>
-            )}
+            </div>
 
-            <div className="flex flex-col sm:flex-row flex-wrap gap-4">
+            <div className="bet-action-grid">
               <button
+                type="button"
+                className="bet-action-button bet-win-button"
+                disabled={isLoading}
                 onClick={() => resolveBet(1)}
-                className="bg-green-600 hover:bg-green-700 px-4 py-2 rounded-lg shadow"
               >
-                ✅ WIN Kazandı
+                <span className="bet-action-icon">
+                  ✅
+                </span>
+
+                <span>
+                  {loadingAction === "win"
+                    ? "İşleniyor..."
+                    : "WIN Kazandı"}
+                </span>
               </button>
 
               <button
+                type="button"
+                className="bet-action-button bet-lose-button"
+                disabled={isLoading}
                 onClick={() => resolveBet(2)}
-                className="bg-red-500 hover:bg-red-600 px-4 py-2 rounded-lg shadow"
               >
-                ❌ LOSE Kazandı
+                <span className="bet-action-icon">
+                  ❌
+                </span>
+
+                <span>
+                  {loadingAction === "lose"
+                    ? "İşleniyor..."
+                    : "LOSE Kazandı"}
+                </span>
               </button>
 
               <button
+                type="button"
+                className="bet-action-button bet-cancel-button"
+                disabled={isLoading}
                 onClick={cancelBet}
-                className="bg-yellow-400 hover:bg-yellow-500 text-black px-4 py-2 rounded-lg shadow"
               >
-                🔄 Beti İptal Et (Puanları Geri Ver)
+                <span className="bet-action-icon">
+                  ↩️
+                </span>
+
+                <span>
+                  {loadingAction === "cancel"
+                    ? "İptal Ediliyor..."
+                    : "Beti İptal Et"}
+                </span>
               </button>
 
               <button
+                type="button"
+                className="bet-action-button bet-house-button"
+                disabled={isLoading}
                 onClick={houseWinBet}
-                className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg shadow"
               >
-                🏦 Herkes Kaybetsin
+                <span className="bet-action-icon">
+                  💀
+                </span>
+
+                <span>
+                  {loadingAction === "house"
+                    ? "İşleniyor..."
+                    : "Herkes Kaybetsin"}
+                </span>
               </button>
             </div>
-          </div>
+
+            <div className="bet-action-notes">
+              <div className="bet-cancel-note">
+                ↩️ İptal edilirse yatırılan
+                puanlar geri verilir.
+              </div>
+
+              <div className="bet-house-note">
+                💀 Herkes kaybederse hiçbir
+                puan geri verilmez.
+              </div>
+            </div>
+          </section>
         )}
 
         {message && (
-          <div className="bg-purple-700 p-4 rounded-lg text-center text-white shadow-md">
+          <div className="bet-message">
             {message}
           </div>
         )}
 
         {history.length > 0 && (
-          <div className="bg-purple-950 border border-purple-800 rounded-xl p-6 mt-8">
-            <h2 className="text-xl font-semibold mb-4">
-              📜 Geçmiş Betler
-            </h2>
+          <section className="bet-card bet-history-card">
+            <div className="bet-section-title">
+              <div className="bet-section-icon">
+                📜
+              </div>
 
-            <ul className="space-y-2 text-purple-300 text-sm">
-              {history.map((b, idx) => (
-                <li
-                  key={idx}
-                  className="border-b border-purple-800 pb-2"
-                >
-                  <div className="font-medium">
-                    🎯 {b.title}
-                  </div>
+              <div>
+                <h2>Geçmiş Betler</h2>
 
-                  <div>
-                    Sonuç:{" "}
-                    {b.winner === 1
-                      ? "✅ WIN Seçildi"
-                      : b.winner === 2
-                      ? "❌ LOSE Seçildi"
-                      : b.winner === 0
-                      ? "🏦 Herkes Kaybetti"
-                      : "⛔ İptal Edildi"}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </div>
+                <p>
+                  Sonuçlandırılan son bahisler.
+                </p>
+              </div>
+            </div>
+
+            <div className="bet-history-list">
+              {history.map(
+                (bet, index) => {
+                  const result =
+                    getHistoryResult(
+                      bet.winner
+                    );
+
+                  return (
+                    <div
+                      className="bet-history-item"
+                      key={`${bet.created_at || "bet"}-${index}`}
+                    >
+                      <div className="bet-history-content">
+                        <h3>
+                          🎯 {bet.title}
+                        </h3>
+
+                        {bet.created_at && (
+                          <span>
+                            {new Date(
+                              bet.created_at
+                            ).toLocaleString(
+                              "tr-TR"
+                            )}
+                          </span>
+                        )}
+                      </div>
+
+                      <div
+                        className={`bet-history-result ${result.className}`}
+                      >
+                        {result.text}
+                      </div>
+                    </div>
+                  );
+                }
+              )}
+            </div>
+          </section>
         )}
 
-        <div className="ugur-signature">
+        <footer className="bet-footer">
           <p>
-            👤 <strong>Uğur</strong> —{" "}
+            👤 <strong>Uğur</strong>
+            <span>—</span>
+
             <a
               href="https://kick.com/ugordi"
               target="_blank"
               rel="noopener noreferrer"
             >
               kick.com/ugordi
-            </a>{" "}
-            — 📧 bayrak1017@gmail.com
+            </a>
+
+            <span>—</span>
+            📧 bayrak1017@gmail.com
           </p>
-        </div>
+        </footer>
       </div>
     </div>
   );

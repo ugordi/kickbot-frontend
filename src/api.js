@@ -2,7 +2,7 @@
 
 import axios from "axios";
 
-const API_BASE = "https://212sbot.up.railway.app/api";
+const API_BASE = "https://212sbot.com/api";
 
 // Kullanıcı puanları
 export const getPoints = (streamer_id) =>
@@ -29,4 +29,13 @@ export const updateSettings = (streamer_id, settings) =>
   axios.post(`${API_BASE}/settings/update`, {
     streamer_id,
     ...settings,
+  });
+
+  export const applyTax = (
+  streamer_id,
+  percentage
+) =>
+  axios.post(`${API_BASE}/points/tax`, {
+    streamer_id,
+    percentage,
   });

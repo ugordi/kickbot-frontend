@@ -1,202 +1,805 @@
-import { useEffect, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useState,
+} from "react";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
 import "./App.css";
 import { BACKEND_URL } from "./config";
 
-
 function GiveawayPanel() {
-  const [streamerId] = useState(localStorage.getItem("streamer_id"));
+  const navigate = useNavigate();
+
+  const [streamerId] = useState(
+    localStorage.getItem("streamer_id")
+  );
+
   const [title, setTitle] = useState("");
   const [command, setCommand] = useState("");
   const [price, setPrice] = useState(100);
-  const [maxTickets, setMaxTickets] = useState(1);
+  const [maxTickets, setMaxTickets] =
+    useState(1);
 
   const [entries, setEntries] = useState([]);
   const [winner, setWinner] = useState(null);
-  const [allGiveaways, setAllGiveaways] = useState([]);
+  const [allGiveaways, setAllGiveaways] =
+    useState([]);
 
-  const navigate = useNavigate();
+  const [activeGiveaway, setActiveGiveaway] =
+    useState(null);
 
-  const fetchEntries = async () => {
-    const res = await axios.get(`${BACKEND_URL}/giveaway/${streamerId}`);
-    if (res.data && res.data.id) {
-      const entryRes = await axios.get(`${BACKEND_URL}/giveaway/entries/${res.data.id}`);
-      setEntries(entryRes.data);
-    } else {
+  const [message, setMessage] = useState("");
+  const [loadingAction, setLoadingAction] =
+    useState("");
+
+  const fetchEntries = useCallback(async () => {
+    if (!streamerId) {
       setEntries([]);
+      setActiveGiveaway(null);
+      return;
     }
-  };
 
-  const fetchAllGiveaways = async () => {
-    const res = await axios.get(`${BACKEND_URL}/giveaway/list/${streamerId}`);
-    setAllGiveaways(res.data);
-  };
-
-  const createGiveaway = async () => {
-    await axios.post(`${BACKEND_URL}/giveaway/create`, {
-      streamer_id: streamerId,
-      title,
-      command,
-      ticket_price: price,
-      max_tickets_per_user: maxTickets,
-    });
-    fetchEntries();
-    fetchAllGiveaways();
-  };
-
-  const deactivateGiveaway = async (id) => {
-    if (!window.confirm("Bu çekilişi kapatmak istediğinize emin misiniz?")) return;
     try {
-      await axios.post(`${BACKEND_URL}/giveaway/deactivate`, {
-        giveaway_id: id
-      });
-      fetchAllGiveaways();
-    } catch (err) {
-      alert("Pasifleştirme başarısız.");
-    }
-  };
+      const response = await axios.get(
+        `${BACKEND_URL}/giveaway/${streamerId}`
+      );
 
-  const draw = async () => {
-    try {
-      const res = await axios.post(`${BACKEND_URL}/giveaway/draw`, {
-        streamer_id: streamerId
-      });
+      const giveaway = response.data;
 
-      setWinner(res.data.winner);
+      if (giveaway?.id) {
+        setActiveGiveaway(giveaway);
 
-      if (res.data.giveaway_id) {
-        const entryRes = await axios.get(`${BACKEND_URL}/giveaway/entries/${res.data.giveaway_id}`);
-        setEntries(entryRes.data);
+        const entryResponse = await axios.get(
+          `${BACKEND_URL}/giveaway/entries/${giveaway.id}`
+        );
+
+        setEntries(
+          Array.isArray(entryResponse.data)
+            ? entryResponse.data
+            : []
+        );
+      } else {
+        setActiveGiveaway(null);
+        setEntries([]);
       }
+    } catch (error) {
+      console.error(
+        "Katılımcılar alınamadı:",
+        error
+      );
 
-      fetchAllGiveaways();
-    } catch (err) {
-      console.error("❌ Çekiliş hatası:", err.response?.data || err.message);
-      alert("Kazanan seçilemedi. Lütfen katılımcı olduğundan emin olun.");
-    }
-  };
-
-  useEffect(() => {
-    if (streamerId) {
-      fetchEntries();
-      fetchAllGiveaways();
+      setEntries([]);
+      setActiveGiveaway(null);
     }
   }, [streamerId]);
 
+  const fetchAllGiveaways =
+    useCallback(async () => {
+      if (!streamerId) {
+        setAllGiveaways([]);
+        return;
+      }
+
+      try {
+        const response = await axios.get(
+          `${BACKEND_URL}/giveaway/list/${streamerId}`
+        );
+
+        setAllGiveaways(
+          Array.isArray(response.data)
+            ? response.data
+            : []
+        );
+      } catch (error) {
+        console.error(
+          "Çekiliş geçmişi alınamadı:",
+          error
+        );
+
+        setAllGiveaways([]);
+      }
+    }, [streamerId]);
+
+  useEffect(() => {
+    if (!streamerId) {
+      setMessage(
+        "Yayıncı bilgisi bulunamadı. Tekrar giriş yapın."
+      );
+
+      return;
+    }
+
+    fetchEntries();
+    fetchAllGiveaways();
+  }, [
+    streamerId,
+    fetchEntries,
+    fetchAllGiveaways,
+  ]);
+
+  const createGiveaway = async () => {
+    const cleanTitle = title.trim();
+
+    const cleanCommand = command
+      .trim()
+      .replace(/^!+/, "")
+      .toLocaleLowerCase("tr");
+
+    if (!cleanTitle) {
+      setMessage(
+        "Çekiliş başlığı boş olamaz."
+      );
+
+      return;
+    }
+
+    if (!cleanCommand) {
+      setMessage(
+        "Çekiliş komutu boş olamaz."
+      );
+
+      return;
+    }
+
+    if (
+      !Number.isFinite(price) ||
+      price <= 0
+    ) {
+      setMessage(
+        "Geçerli bir bilet fiyatı girin."
+      );
+
+      return;
+    }
+
+    if (
+      !Number.isFinite(maxTickets) ||
+      maxTickets <= 0
+    ) {
+      setMessage(
+        "Geçerli bir maksimum bilet sayısı girin."
+      );
+
+      return;
+    }
+
+    try {
+      setLoadingAction("create");
+      setMessage("");
+      setWinner(null);
+
+      await axios.post(
+        `${BACKEND_URL}/giveaway/create`,
+        {
+          streamer_id: streamerId,
+          title: cleanTitle,
+          command: cleanCommand,
+          ticket_price: price,
+          max_tickets_per_user: maxTickets,
+        }
+      );
+
+      setTitle("");
+      setCommand("");
+      setPrice(100);
+      setMaxTickets(1);
+
+      setMessage(
+        "Çekiliş başarıyla başlatıldı."
+      );
+
+      await Promise.all([
+        fetchEntries(),
+        fetchAllGiveaways(),
+      ]);
+    } catch (error) {
+      console.error(
+        "Çekiliş oluşturma hatası:",
+        error
+      );
+
+      setMessage(
+        error.response?.data?.error ||
+          "Çekiliş başlatılamadı."
+      );
+    } finally {
+      setLoadingAction("");
+    }
+  };
+
+  const deactivateGiveaway = async (
+    giveawayId
+  ) => {
+    const confirmed = window.confirm(
+      "Bu çekilişi kapatmak istediğinize emin misiniz?"
+    );
+
+    if (!confirmed) return;
+
+    try {
+      setLoadingAction(
+        `deactivate-${giveawayId}`
+      );
+
+      setMessage("");
+
+      await axios.post(
+        `${BACKEND_URL}/giveaway/deactivate`,
+        {
+          giveaway_id: giveawayId,
+        }
+      );
+
+      setMessage(
+        "Çekiliş kapatıldı."
+      );
+
+      await Promise.all([
+        fetchEntries(),
+        fetchAllGiveaways(),
+      ]);
+    } catch (error) {
+      console.error(
+        "Çekiliş kapatma hatası:",
+        error
+      );
+
+      setMessage(
+        error.response?.data?.error ||
+          "Çekiliş kapatılamadı."
+      );
+    } finally {
+      setLoadingAction("");
+    }
+  };
+
+  const drawWinner = async () => {
+    try {
+      setLoadingAction("draw");
+      setMessage("");
+
+      const response = await axios.post(
+        `${BACKEND_URL}/giveaway/draw`,
+        {
+          streamer_id: streamerId,
+        }
+      );
+
+      setWinner(response.data.winner);
+
+      if (response.data.giveaway_id) {
+        const entryResponse = await axios.get(
+          `${BACKEND_URL}/giveaway/entries/${response.data.giveaway_id}`
+        );
+
+        setEntries(
+          Array.isArray(entryResponse.data)
+            ? entryResponse.data
+            : []
+        );
+      }
+
+      setMessage(
+        response.data?.winner?.username
+          ? `Kazanan: ${response.data.winner.username}`
+          : "Kazanan seçildi."
+      );
+
+      await fetchAllGiveaways();
+      await fetchEntries();
+    } catch (error) {
+      console.error(
+        "Çekiliş hatası:",
+        error.response?.data ||
+          error.message
+      );
+
+      setMessage(
+        error.response?.data?.error ||
+          "Kazanan seçilemedi. Katılımcı olduğundan emin olun."
+      );
+    } finally {
+      setLoadingAction("");
+    }
+  };
+
+  const isLoading =
+    loadingAction !== "";
+
+  const totalTickets = entries.reduce(
+    (total, entry) =>
+      total + Number(entry.tickets || 0),
+    0
+  );
+
+  const activeGiveawayCount =
+    allGiveaways.filter(
+      (giveaway) =>
+        Number(giveaway.is_active) === 1
+    ).length;
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-900 via-purple-700 to-purple-800 text-white p-6 font-sans">
-      <div className="max-w-4xl mx-auto">
-        <h1 className="text-3xl font-bold mb-6 text-center">🎉 Çekiliş Paneli</h1>
+    <div className="giveaway-page">
+      <div className="giveaway-container">
+        <header className="giveaway-header">
+          <div className="giveaway-header-icon">
+            🎉
+          </div>
+
+          <h1>Çekiliş Paneli</h1>
+
+          <p>
+            Yeni çekiliş oluştur, katılımcıları
+            takip et ve kazananı belirle.
+          </p>
+        </header>
 
         <button
+          type="button"
+          className="giveaway-back-button"
           onClick={() => navigate("/")}
-          className="elite-button-purple mb-6"
         >
-          ⬅️ Ana Panele Dön
+          <span>←</span>
+          Ana Panele Dön
         </button>
 
-        {/* Yeni Çekiliş */}
-        <div className="bg-purple-950 border border-purple-800 rounded-xl p-6 mb-8">
-          <h2 className="text-xl font-semibold mb-4">📝 Yeni Çekiliş Oluştur</h2>
-          <div className="grid grid-cols-1 gap-4">
-            <input
-              type="text"
-              placeholder="Çekiliş Başlığı (örn: TV Çekilişi)"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              className="px-3 py-2 rounded bg-purple-900 text-white border border-purple-700"
-            />
-            <input
-              type="text"
-              placeholder="Komut (örn: tv)"
-              value={command}
-              onChange={(e) => setCommand(e.target.value)}
-              className="px-3 py-2 rounded bg-purple-900 text-white border border-purple-700"
-            />
-            <input
-              type="number"
-              placeholder="Bilet Fiyatı"
-              value={price}
-              onChange={(e) => setPrice(parseInt(e.target.value))}
-              className="px-3 py-2 rounded bg-purple-900 text-white border border-purple-700"
-            />
-            <input
-              type="number"
-              placeholder="Max Bilet (örn: 5)"
-              value={maxTickets}
-              onChange={(e) => setMaxTickets(parseInt(e.target.value))}
-              className="px-3 py-2 rounded bg-purple-900 text-white border border-purple-700"
-            />
-            <button
-              onClick={createGiveaway}
-              className="elite-button-blue"
-            >
-              🚀 Çekilişi Başlat
-            </button>
-          </div>
-        </div>
+        <section className="giveaway-stats">
+          <div className="giveaway-stat-card">
+            <div className="giveaway-stat-icon active">
+              🟢
+            </div>
 
-        {/* Katılımcılar */}
-        <div className="bg-purple-950 border border-purple-800 rounded-xl p-6 mb-8">
-          <h2 className="text-xl font-semibold mb-4">👥 Katılımcılar</h2>
-          {entries.length === 0 ? (
-            <p>Henüz katılım yok.</p>
+            <div>
+              <span>Aktif Çekiliş</span>
+
+              <strong>
+                {activeGiveawayCount}
+              </strong>
+            </div>
+          </div>
+
+          <div className="giveaway-stat-card">
+            <div className="giveaway-stat-icon users">
+              👥
+            </div>
+
+            <div>
+              <span>Katılımcı</span>
+
+              <strong>
+                {entries.length}
+              </strong>
+            </div>
+          </div>
+
+          <div className="giveaway-stat-card">
+            <div className="giveaway-stat-icon tickets">
+              🎫
+            </div>
+
+            <div>
+              <span>Toplam Bilet</span>
+
+              <strong>
+                {totalTickets.toLocaleString(
+                  "tr-TR"
+                )}
+              </strong>
+            </div>
+          </div>
+        </section>
+
+        {message && (
+          <div className="giveaway-message">
+            {message}
+          </div>
+        )}
+
+        <section className="giveaway-card">
+          <div className="giveaway-section-title">
+            <div className="giveaway-section-icon create">
+              📝
+            </div>
+
+            <div>
+              <h2>Yeni Çekiliş Oluştur</h2>
+
+              <p>
+                Başlık, komut ve bilet
+                kurallarını belirle.
+              </p>
+            </div>
+          </div>
+
+          <div className="giveaway-form-grid">
+            <label className="giveaway-form-group giveaway-form-wide">
+              <span>Çekiliş Başlığı</span>
+
+              <input
+                type="text"
+                placeholder="Örnek: Oyuncu koltuğu çekilişi"
+                value={title}
+                onChange={(event) =>
+                  setTitle(event.target.value)
+                }
+              />
+            </label>
+
+            <label className="giveaway-form-group giveaway-form-wide">
+              <span>Katılım Komutu</span>
+
+              <div className="giveaway-command-wrapper">
+                <strong>!</strong>
+
+                <input
+                  type="text"
+                  placeholder="Örnek: koltuk"
+                  value={command}
+                  onChange={(event) =>
+                    setCommand(
+                      event.target.value
+                        .replace(/^!+/, "")
+                    )
+                  }
+                />
+              </div>
+            </label>
+
+            <label className="giveaway-form-group">
+              <span>Bilet Fiyatı</span>
+
+              <div className="giveaway-input-wrapper">
+                <input
+                  type="number"
+                  min="1"
+                  value={price}
+                  onChange={(event) =>
+                    setPrice(
+                      Number(
+                        event.target.value
+                      )
+                    )
+                  }
+                />
+
+                <small>PUAN</small>
+              </div>
+            </label>
+
+            <label className="giveaway-form-group">
+              <span>Maksimum Bilet</span>
+
+              <div className="giveaway-input-wrapper">
+                <input
+                  type="number"
+                  min="1"
+                  value={maxTickets}
+                  onChange={(event) =>
+                    setMaxTickets(
+                      Number(
+                        event.target.value
+                      )
+                    )
+                  }
+                />
+
+                <small>ADET</small>
+              </div>
+            </label>
+          </div>
+
+          <div className="giveaway-preview">
+            <span>Komut ön izlemesi</span>
+
+            <code>
+              !
+              {command
+                .trim()
+                .replace(/^!+/, "") ||
+                "komut"}{" "}
+              [puan]
+            </code>
+          </div>
+
+          <button
+            type="button"
+            className="giveaway-create-button"
+            onClick={createGiveaway}
+            disabled={isLoading}
+          >
+            {loadingAction === "create"
+              ? "Çekiliş Başlatılıyor..."
+              : "🚀 Çekilişi Başlat"}
+          </button>
+        </section>
+
+        <section className="giveaway-card">
+          <div className="giveaway-section-title">
+            <div className="giveaway-section-icon participants">
+              👥
+            </div>
+
+            <div>
+              <h2>Aktif Çekiliş</h2>
+
+              <p>
+                Katılımcıları ve bilet
+                sayılarını görüntüle.
+              </p>
+            </div>
+          </div>
+
+          {activeGiveaway ? (
+            <div className="giveaway-active-info">
+              <div>
+                <span>Çekiliş</span>
+
+                <strong>
+                  {activeGiveaway.title}
+                </strong>
+              </div>
+
+              <div>
+                <span>Komut</span>
+
+                <code>
+                  !{activeGiveaway.command}
+                </code>
+              </div>
+
+              <div>
+                <span>Bilet</span>
+
+                <strong>
+                  {Number(
+                    activeGiveaway.ticket_price ||
+                      0
+                  ).toLocaleString(
+                    "tr-TR"
+                  )}{" "}
+                  puan
+                </strong>
+              </div>
+            </div>
           ) : (
-            <ul className="space-y-2">
-              {entries.map((entry) => (
-                <li key={entry.user_id} className="text-purple-300">
-                  {entry.username} — 🎫 {entry.tickets} bilet
-                </li>
-              ))}
-            </ul>
+            <div className="giveaway-empty-state">
+              <span>📭</span>
+
+              <div>
+                <strong>
+                  Aktif çekiliş bulunmuyor
+                </strong>
+
+                <p>
+                  Yeni bir çekiliş oluşturarak
+                  katılım toplamaya başlayabilirsin.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {entries.length === 0 ? (
+            <div className="giveaway-empty-participants">
+              Henüz çekilişe katılan olmadı.
+            </div>
+          ) : (
+            <div className="giveaway-participant-list">
+              {entries.map(
+                (entry, index) => (
+                  <div
+                    key={entry.user_id}
+                    className="giveaway-participant-item"
+                  >
+                    <div className="giveaway-participant-rank">
+                      {index + 1}
+                    </div>
+
+                    <div className="giveaway-participant-name">
+                      <strong>
+                        {entry.username}
+                      </strong>
+
+                      <span>
+                        Kullanıcı ID:{" "}
+                        {entry.user_id}
+                      </span>
+                    </div>
+
+                    <div className="giveaway-ticket-badge">
+                      🎫{" "}
+                      {Number(
+                        entry.tickets || 0
+                      ).toLocaleString(
+                        "tr-TR"
+                      )}{" "}
+                      bilet
+                    </div>
+                  </div>
+                )
+              )}
+            </div>
           )}
 
           <button
-            onClick={draw}
-            className="mt-6 bg-yellow-500 hover:bg-yellow-600 text-black px-6 py-2 rounded-lg shadow"
+            type="button"
+            className="giveaway-draw-button"
+            onClick={drawWinner}
+            disabled={
+              isLoading ||
+              entries.length === 0 ||
+              !activeGiveaway
+            }
           >
-            🎯 Kazananı Seç
+            {loadingAction === "draw"
+              ? "Kazanan Seçiliyor..."
+              : "🎯 Kazananı Seç"}
           </button>
 
           {winner && (
-            <div className="mt-4 p-4 bg-green-800 rounded-lg">
-              🎉 Kazanan: <span className="font-bold">{winner.username}</span>
+            <div className="giveaway-winner-box">
+              <div className="giveaway-winner-crown">
+                👑
+              </div>
+
+              <div>
+                <span>
+                  Çekiliş Kazananı
+                </span>
+
+                <strong>
+                  {winner.username}
+                </strong>
+
+                <small>
+                  {winner.tickets
+                    ? `${winner.tickets} bilet ile katıldı`
+                    : "Tebrikler!"}
+                </small>
+              </div>
             </div>
           )}
-        </div>
+        </section>
 
-        {/* Geçmiş Çekilişler */}
-        <div className="bg-purple-950 border border-purple-800 rounded-xl p-6 mb-8">
-          <h2 className="text-xl font-semibold mb-4">📜 Geçmiş Çekilişler</h2>
+        <section className="giveaway-card">
+          <div className="giveaway-section-title">
+            <div className="giveaway-section-icon history">
+              📜
+            </div>
+
+            <div>
+              <h2>Çekiliş Geçmişi</h2>
+
+              <p>
+                Daha önce oluşturulan tüm
+                çekilişleri görüntüle.
+              </p>
+            </div>
+          </div>
+
           {allGiveaways.length === 0 ? (
-            <p>Henüz çekiliş yapılmadı.</p>
+            <div className="giveaway-empty-participants">
+              Henüz çekiliş oluşturulmadı.
+            </div>
           ) : (
-            <ul className="space-y-2">
-              {allGiveaways.map((g) => (
-                <li key={g.id} className="text-purple-300 flex justify-between items-center">
-                  <span>
-                    <strong>{g.title}</strong> — Komut: <code>!{g.command}</code> — Fiyat: {g.ticket_price} — Max Bilet: {g.max_tickets_per_user} — {g.is_active ? "🟢 Aktif" : "🔴 Bitti"}
-                  </span>
-                  {g.is_active && (
-                    <button
-                      onClick={() => deactivateGiveaway(g.id)}
-                      className="elite-button-red-small"
-                    >
-                      ❌ Kapat
-                    </button>
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </div>
+            <div className="giveaway-history-list">
+              {allGiveaways.map(
+                (giveaway) => {
+                  const isActive =
+                    Number(
+                      giveaway.is_active
+                    ) === 1;
 
-      <div className="ugur-signature">
-        <p>
-          👤 <strong>Uğur</strong> — <a href="https://kick.com/ugordi" target="_blank" rel="noopener noreferrer">kick.com/ugordi</a> — 📧 bayrak1017@gmail.com
-        </p>
+                  return (
+                    <div
+                      key={giveaway.id}
+                      className="giveaway-history-item"
+                    >
+                      <div className="giveaway-history-main">
+                        <div className="giveaway-history-title-row">
+                          <h3>
+                            {giveaway.title}
+                          </h3>
+
+                          <span
+                            className={
+                              isActive
+                                ? "giveaway-status active"
+                                : "giveaway-status ended"
+                            }
+                          >
+                            {isActive
+                              ? "🟢 Aktif"
+                              : "🔴 Bitti"}
+                          </span>
+                        </div>
+
+                        <div className="giveaway-history-details">
+                          <span>
+                            Komut:{" "}
+                            <code>
+                              !
+                              {
+                                giveaway.command
+                              }
+                            </code>
+                          </span>
+
+                          <span>
+                            Bilet:{" "}
+                            {Number(
+                              giveaway.ticket_price ||
+                                0
+                            ).toLocaleString(
+                              "tr-TR"
+                            )}{" "}
+                            puan
+                          </span>
+
+                          <span>
+                            Maksimum:{" "}
+                            {
+                              giveaway.max_tickets_per_user
+                            }{" "}
+                            bilet
+                          </span>
+                        </div>
+
+                        {giveaway.created_at && (
+                          <small>
+                            {new Date(
+                              giveaway.created_at
+                            ).toLocaleString(
+                              "tr-TR"
+                            )}
+                          </small>
+                        )}
+                      </div>
+
+                      {isActive && (
+                        <button
+                          type="button"
+                          className="giveaway-close-button"
+                          disabled={isLoading}
+                          onClick={() =>
+                            deactivateGiveaway(
+                              giveaway.id
+                            )
+                          }
+                        >
+                          {loadingAction ===
+                          `deactivate-${giveaway.id}`
+                            ? "Kapatılıyor..."
+                            : "✕ Çekilişi Kapat"}
+                        </button>
+                      )}
+                    </div>
+                  );
+                }
+              )}
+            </div>
+          )}
+        </section>
+
+        <footer className="giveaway-footer">
+          <p>
+            👤 <strong>Uğur</strong>
+
+            <span>—</span>
+
+            <a
+              href="https://kick.com/ugordi"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              kick.com/ugordi
+            </a>
+
+            <span>—</span>
+
+            📧 bayrak1017@gmail.com
+          </p>
+        </footer>
       </div>
     </div>
   );

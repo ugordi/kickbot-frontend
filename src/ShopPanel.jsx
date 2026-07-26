@@ -1,165 +1,727 @@
-import { useEffect, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useState,
+} from "react";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
 import "./App.css";
 import { BACKEND_URL } from "./config";
 
 function ShopPanel() {
-  const [streamerId] = useState(localStorage.getItem("streamer_id"));
+  const navigate = useNavigate();
+
+  const [streamerId] = useState(
+    localStorage.getItem("streamer_id")
+  );
+
   const [name, setName] = useState("");
   const [command, setCommand] = useState("");
   const [price, setPrice] = useState(100);
+
   const [items, setItems] = useState([]);
   const [buyers, setBuyers] = useState({});
+  const [openBuyerLists, setOpenBuyerLists] =
+    useState({});
 
-  const navigate = useNavigate();
+  const [message, setMessage] = useState("");
+  const [loadingAction, setLoadingAction] =
+    useState("");
 
-  const fetchItems = async () => {
-    const res = await axios.get(`${BACKEND_URL}/shop/${streamerId}`);
-    setItems(res.data);
-  };
+  const fetchItems = useCallback(async () => {
+    if (!streamerId) {
+      setItems([]);
+      return;
+    }
+
+    try {
+      const response = await axios.get(
+        `${BACKEND_URL}/shop/${streamerId}`
+      );
+
+      setItems(
+        Array.isArray(response.data)
+          ? response.data
+          : []
+      );
+    } catch (error) {
+      console.error(
+        "Ürünler alınamadı:",
+        error
+      );
+
+      setItems([]);
+      setMessage(
+        "Ürün listesi alınamadı."
+      );
+    }
+  }, [streamerId]);
+
+  useEffect(() => {
+    if (!streamerId) {
+      setMessage(
+        "Yayıncı bilgisi bulunamadı. Tekrar giriş yapın."
+      );
+
+      return;
+    }
+
+    fetchItems();
+  }, [streamerId, fetchItems]);
 
   const fetchBuyers = async (itemId) => {
-    const res = await axios.get(`${BACKEND_URL}/shop/buyers/${itemId}`);
-    setBuyers((prev) => ({ ...prev, [itemId]: res.data }));
+    const isAlreadyOpen =
+      Boolean(openBuyerLists[itemId]);
+
+    if (isAlreadyOpen) {
+      setOpenBuyerLists((current) => ({
+        ...current,
+        [itemId]: false,
+      }));
+
+      return;
+    }
+
+    if (buyers[itemId]) {
+      setOpenBuyerLists((current) => ({
+        ...current,
+        [itemId]: true,
+      }));
+
+      return;
+    }
+
+    try {
+      setLoadingAction(
+        `buyers-${itemId}`
+      );
+
+      const response = await axios.get(
+        `${BACKEND_URL}/shop/buyers/${itemId}`
+      );
+
+      setBuyers((currentBuyers) => ({
+        ...currentBuyers,
+        [itemId]: Array.isArray(
+          response.data
+        )
+          ? response.data
+          : [],
+      }));
+
+      setOpenBuyerLists((current) => ({
+        ...current,
+        [itemId]: true,
+      }));
+    } catch (error) {
+      console.error(
+        "Satın alanlar alınamadı:",
+        error
+      );
+
+      setMessage(
+        "Satın alan kullanıcılar alınamadı."
+      );
+    } finally {
+      setLoadingAction("");
+    }
   };
 
   const createItem = async () => {
-    if (!name || !command) return alert("Tüm alanları doldurun");
-    await axios.post(`${BACKEND_URL}/shop/create`, {
-      streamer_id: streamerId,
-      name,
-      command,
-      price,
-    });
-    setName("");
-    setCommand("");
-    setPrice(100);
-    fetchItems();
+    const cleanName = name.trim();
+
+    const cleanCommand = command
+      .trim()
+      .replace(/^!+/, "")
+      .toLocaleLowerCase("tr");
+
+    if (!cleanName) {
+      setMessage(
+        "Ürün adı boş olamaz."
+      );
+
+      return;
+    }
+
+    if (!cleanCommand) {
+      setMessage(
+        "Ürün komutu boş olamaz."
+      );
+
+      return;
+    }
+
+    if (
+      !Number.isFinite(price) ||
+      price <= 0
+    ) {
+      setMessage(
+        "Geçerli bir ürün fiyatı girin."
+      );
+
+      return;
+    }
+
+    try {
+      setLoadingAction("create");
+      setMessage("");
+
+      await axios.post(
+        `${BACKEND_URL}/shop/create`,
+        {
+          streamer_id: streamerId,
+          name: cleanName,
+          command: cleanCommand,
+          price,
+        }
+      );
+
+      setName("");
+      setCommand("");
+      setPrice(100);
+
+      setMessage(
+        "Ürün başarıyla dükkana eklendi."
+      );
+
+      await fetchItems();
+    } catch (error) {
+      console.error(
+        "Ürün oluşturma hatası:",
+        error
+      );
+
+      setMessage(
+        error.response?.data?.error ||
+          "Ürün eklenemedi. Komut daha önce kullanılmış olabilir."
+      );
+    } finally {
+      setLoadingAction("");
+    }
   };
 
-  useEffect(() => {
-    if (streamerId) fetchItems();
-  }, [streamerId]);
+  const deleteItem = async (itemId) => {
+    const confirmed = window.confirm(
+      "Bu ürünü silmek istediğinize emin misiniz?"
+    );
 
-  const deleteItem = async (id) => {
-    const confirmDelete = window.confirm("Bu ürünü silmek istediğinize emin misiniz?");
-    if (!confirmDelete) return;
+    if (!confirmed) {
+      return;
+    }
 
-      try {
-        await axios.delete(`${BACKEND_URL}/shop/${id}`);
-        fetchItems(); // Listeyi güncelle
-      } catch (err) {
-        alert("Silme işlemi başarısız.");
-      }
+    try {
+      setLoadingAction(
+        `delete-${itemId}`
+      );
+
+      setMessage("");
+
+      await axios.delete(
+        `${BACKEND_URL}/shop/${itemId}`
+      );
+
+      setBuyers((currentBuyers) => {
+        const updatedBuyers = {
+          ...currentBuyers,
+        };
+
+        delete updatedBuyers[itemId];
+
+        return updatedBuyers;
+      });
+
+      setOpenBuyerLists((currentLists) => {
+        const updatedLists = {
+          ...currentLists,
+        };
+
+        delete updatedLists[itemId];
+
+        return updatedLists;
+      });
+
+      setMessage(
+        "Ürün dükkandan silindi."
+      );
+
+      await fetchItems();
+    } catch (error) {
+      console.error(
+        "Ürün silme hatası:",
+        error
+      );
+
+      setMessage(
+        error.response?.data?.error ||
+          "Silme işlemi başarısız."
+      );
+    } finally {
+      setLoadingAction("");
+    }
   };
 
+  const handleCommandChange = (value) => {
+    const normalizedCommand = value
+      .replace(/^!+/, "")
+      .replace(/\s+/g, "")
+      .toLocaleLowerCase("tr");
+
+    setCommand(normalizedCommand);
+  };
+
+  const totalKnownPurchases =
+    Object.values(buyers).reduce(
+      (total, itemBuyers) =>
+        total +
+        (Array.isArray(itemBuyers)
+          ? itemBuyers.length
+          : 0),
+      0
+    );
+
+  const isLoading =
+    loadingAction !== "";
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-900 via-purple-700 to-purple-800 text-white p-6 font-sans">
-      <div className="max-w-4xl mx-auto">
-        <h1 className="text-3xl font-bold mb-6 text-center">🛒 Dükkan Paneli</h1>
+    <div className="shop-page">
+      <div className="shop-container">
+        <header className="shop-header">
+          <div className="shop-header-icon">
+            🛒
+          </div>
+
+          <h1>Dükkan Paneli</h1>
+
+          <p>
+            Yayın dükkanına ürün ekle,
+            komutları yönet ve satın alanları
+            görüntüle.
+          </p>
+        </header>
 
         <button
+          type="button"
+          className="shop-back-button"
           onClick={() => navigate("/")}
-          className="elite-button-purple mb-6"
         >
-          ⬅️ Ana Panele Dön
+          <span>←</span>
+          Ana Panele Dön
         </button>
 
-        {/* Ürün Ekleme */}
-        <div className="bg-purple-950 border border-purple-800 rounded-xl p-6 mb-8">
-          <h2 className="text-xl font-semibold mb-4">➕ Ürün Ekle</h2>
-          <div className="grid grid-cols-1 gap-4">
-            <input
-              type="text"
-              placeholder="Ürün Adı (örn: Ekran Kartı)"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="px-3 py-2 rounded bg-purple-900 text-white border border-purple-700"
-            />
-            <input
-              type="text"
-              placeholder="Komut (örn: ekranKartı)"
-              value={command}
-              onChange={(e) => setCommand(e.target.value)}
-              className="px-3 py-2 rounded bg-purple-900 text-white border border-purple-700"
-            />
-            <input
-              type="number"
-              placeholder="Fiyat (örn: 500)"
-              value={price}
-              onChange={(e) => setPrice(parseInt(e.target.value))}
-              className="px-3 py-2 rounded bg-purple-900 text-white border border-purple-700"
-            />
-            <button
-              onClick={createItem}
-              className="elite-button-green"
-            >
-              🛍️ Ürünü Ekle
-            </button>
+        <section className="shop-stats">
+          <div className="shop-stat-card">
+            <div className="shop-stat-icon products">
+              📦
+            </div>
+
+            <div>
+              <span>Toplam Ürün</span>
+
+              <strong>
+                {items.length.toLocaleString(
+                  "tr-TR"
+                )}
+              </strong>
+            </div>
           </div>
-        </div>
 
+          <div className="shop-stat-card">
+            <div className="shop-stat-icon purchases">
+              🧾
+            </div>
 
-      <div className="bg-yellow-400 text-black px-5 py-3 rounded-xl shadow mb-6 border border-yellow-500">
-        💬 Chat <strong>!dükkan</strong> komutunu yazarak mevcut ürünleri görebilir
-      </div>  
+            <div>
+              <span>Görüntülenen Satın Alım</span>
 
+              <strong>
+                {totalKnownPurchases.toLocaleString(
+                  "tr-TR"
+                )}
+              </strong>
+            </div>
+          </div>
 
-        {/* Mevcut Ürünler */}
-        <div className="bg-purple-950 border border-purple-800 rounded-xl p-6">
-          <h2 className="text-xl font-semibold mb-4">📦 Mevcut Ürünler</h2>
+          <div className="shop-stat-card">
+            <div className="shop-stat-icon command">
+              💬
+            </div>
+
+            <div>
+              <span>Chat Komutu</span>
+
+              <strong className="shop-command-stat">
+                !dükkan
+              </strong>
+            </div>
+          </div>
+        </section>
+
+        {message && (
+          <div className="shop-message">
+            {message}
+          </div>
+        )}
+
+        <section className="shop-card">
+          <div className="shop-section-title">
+            <div className="shop-section-icon create">
+              ➕
+            </div>
+
+            <div>
+              <h2>Yeni Ürün Ekle</h2>
+
+              <p>
+                Ürün adı, satın alma komutu
+                ve puan fiyatını belirle.
+              </p>
+            </div>
+          </div>
+
+          <div className="shop-form-grid">
+            <label className="shop-form-group shop-form-wide">
+              <span>Ürün Adı</span>
+
+              <input
+                type="text"
+                placeholder="Örnek: Ekran Kartı"
+                value={name}
+                onChange={(event) =>
+                  setName(event.target.value)
+                }
+              />
+            </label>
+
+            <label className="shop-form-group shop-form-wide">
+              <span>Satın Alma Komutu</span>
+
+              <div className="shop-command-wrapper">
+                <strong>!</strong>
+
+                <input
+                  type="text"
+                  placeholder="Örnek: ekrankarti"
+                  value={command}
+                  onChange={(event) =>
+                    handleCommandChange(
+                      event.target.value
+                    )
+                  }
+                />
+              </div>
+            </label>
+
+            <label className="shop-form-group">
+              <span>Ürün Fiyatı</span>
+
+              <div className="shop-input-wrapper">
+                <input
+                  type="number"
+                  min="1"
+                  value={price}
+                  onChange={(event) =>
+                    setPrice(
+                      Number(
+                        event.target.value
+                      )
+                    )
+                  }
+                />
+
+                <small>PUAN</small>
+              </div>
+            </label>
+
+            <div className="shop-product-preview">
+              <span>Chat Ön İzlemesi</span>
+
+              <code>
+                !
+                {command.trim() ||
+                  "urun"}
+              </code>
+            </div>
+          </div>
+
+          <div className="shop-preview-message">
+            <span>🛍️</span>
+
+            <p>
+              Kullanıcılar{" "}
+              <code>
+                !
+                {command.trim() ||
+                  "urun"}
+              </code>{" "}
+              yazarak ürünü satın alabilir.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            className="shop-create-button"
+            onClick={createItem}
+            disabled={isLoading}
+          >
+            {loadingAction === "create"
+              ? "Ürün Ekleniyor..."
+              : "🛍️ Ürünü Dükkana Ekle"}
+          </button>
+        </section>
+
+        <section className="shop-command-info">
+          <div className="shop-command-info-icon">
+            💬
+          </div>
+
+          <div>
+            <strong>
+              Chat Dükkan Komutu
+            </strong>
+
+            <p>
+              İzleyiciler{" "}
+              <code>!dükkan</code>{" "}
+              yazarak mevcut ürünleri ve
+              fiyatlarını görebilir.
+            </p>
+          </div>
+        </section>
+
+        <section className="shop-card">
+          <div className="shop-section-title">
+            <div className="shop-section-icon products">
+              📦
+            </div>
+
+            <div>
+              <h2>Mevcut Ürünler</h2>
+
+              <p>
+                Dükkan ürünlerini yönet ve
+                satın alan kullanıcıları incele.
+              </p>
+            </div>
+          </div>
+
           {items.length === 0 ? (
-            <p>Henüz ürün yok.</p>
+            <div className="shop-empty-state">
+              <span>📭</span>
+
+              <div>
+                <strong>
+                  Dükkanda ürün bulunmuyor
+                </strong>
+
+                <p>
+                  Yukarıdaki formu kullanarak
+                  ilk ürününü ekleyebilirsin.
+                </p>
+              </div>
+            </div>
           ) : (
-            <div className="grid gap-6">
-              {items.map((item) => (
-                <div key={item.id} className="shop-item-card">
-                  <div className="flex justify-between items-start gap-4 mb-2">
-                    <div>
-                      <h3 className="text-lg font-bold text-purple-100">{item.name}</h3>
-                      <p className="text-sm text-purple-300">
-                        Komut: <code>!{item.command}</code> — Fiyat: <strong>{item.price}</strong> puan
-                      </p>
+            <div className="shop-product-list">
+              {items.map((item) => {
+                const itemBuyers =
+                  buyers[item.id] || [];
+
+                const isBuyerListOpen =
+                  Boolean(
+                    openBuyerLists[item.id]
+                  );
+
+                const isBuyerLoading =
+                  loadingAction ===
+                  `buyers-${item.id}`;
+
+                const isDeleting =
+                  loadingAction ===
+                  `delete-${item.id}`;
+
+                return (
+                  <article
+                    key={item.id}
+                    className="shop-product-card"
+                  >
+                    <div className="shop-product-top">
+                      <div className="shop-product-symbol">
+                        🛍️
+                      </div>
+
+                      <div className="shop-product-main">
+                        <div className="shop-product-title-row">
+                          <h3>
+                            {item.name}
+                          </h3>
+
+                          <span className="shop-product-price">
+                            {Number(
+                              item.price || 0
+                            ).toLocaleString(
+                              "tr-TR"
+                            )}{" "}
+                            puan
+                          </span>
+                        </div>
+
+                        <div className="shop-product-meta">
+                          <span>
+                            Satın alma komutu:
+                          </span>
+
+                          <code>
+                            !{item.command}
+                          </code>
+                        </div>
+
+                        {item.created_at && (
+                          <small>
+                            Eklenme tarihi:{" "}
+                            {new Date(
+                              item.created_at
+                            ).toLocaleString(
+                              "tr-TR"
+                            )}
+                          </small>
+                        )}
+                      </div>
                     </div>
-                    <button
-                      className="elite-button-show-buyers"
-                      onClick={() => fetchBuyers(item.id)}
-                    >
-                      👥 Alanları Göster
-                    </button>
-                    <button
-                      className="elite-button-red-small ml-10"
-                      onClick={() => deleteItem(item.id)}
-                    >
-                      🗑️ Sil
-                    </button>
-                    
-                  </div>
-                  {buyers[item.id] && buyers[item.id].length > 0 && (
-                    <div className="mt-2 text-sm text-purple-200 border-t border-purple-700 pt-2">
-                      <span className="font-semibold">Satın alanlar:</span>
-                      <ul className="list-disc list-inside mt-1 ml-2">
-                        {buyers[item.id].map((b, i) => (
-                          <li key={i}>
-                            <span className="font-bold">{i + 1} - @{b.username}</span> — {new Date(b.created_at).toLocaleDateString("tr-TR")}
-                          </li>
-                        ))}
-                      </ul>
+
+                    <div className="shop-product-actions">
+                      <button
+                        type="button"
+                        className="shop-buyers-button"
+                        disabled={isLoading}
+                        onClick={() =>
+                          fetchBuyers(item.id)
+                        }
+                      >
+                        <span>👥</span>
+
+                        {isBuyerLoading
+                          ? "Yükleniyor..."
+                          : isBuyerListOpen
+                          ? "Satın Alanları Gizle"
+                          : "Satın Alanları Göster"}
+                      </button>
+
+                      <button
+                        type="button"
+                        className="shop-delete-button"
+                        disabled={isLoading}
+                        onClick={() =>
+                          deleteItem(item.id)
+                        }
+                      >
+                        <span>🗑️</span>
+
+                        {isDeleting
+                          ? "Siliniyor..."
+                          : "Ürünü Sil"}
+                      </button>
                     </div>
-                  )}
-                </div>
-              ))}
+
+                    {isBuyerListOpen && (
+                      <div className="shop-buyers-section">
+                        <div className="shop-buyers-header">
+                          <div>
+                            <strong>
+                              Satın Alanlar
+                            </strong>
+
+                            <span>
+                              Toplam{" "}
+                              {
+                                itemBuyers.length
+                              }{" "}
+                              kullanıcı
+                            </span>
+                          </div>
+
+                          <div className="shop-buyers-count">
+                            👥{" "}
+                            {
+                              itemBuyers.length
+                            }
+                          </div>
+                        </div>
+
+                        {itemBuyers.length ===
+                        0 ? (
+                          <div className="shop-no-buyers">
+                            Bu ürünü henüz satın
+                            alan olmadı.
+                          </div>
+                        ) : (
+                          <div className="shop-buyers-list">
+                            {itemBuyers.map(
+                              (
+                                buyer,
+                                index
+                              ) => (
+                                <div
+                                  key={`${buyer.username}-${buyer.created_at}-${index}`}
+                                  className="shop-buyer-item"
+                                >
+                                  <div className="shop-buyer-rank">
+                                    {index + 1}
+                                  </div>
+
+                                  <div className="shop-buyer-info">
+                                    <strong>
+                                      @
+                                      {
+                                        buyer.username
+                                      }
+                                    </strong>
+
+                                    <span>
+                                      {buyer.created_at
+                                        ? new Date(
+                                            buyer.created_at
+                                          ).toLocaleString(
+                                            "tr-TR"
+                                          )
+                                        : "Tarih bulunamadı"}
+                                    </span>
+                                  </div>
+
+                                  <div className="shop-purchased-badge">
+                                    Satın aldı
+                                  </div>
+                                </div>
+                              )
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </article>
+                );
+              })}
             </div>
           )}
-        </div>
-      </div>
+        </section>
 
-      <div className="ugur-signature mt-8">
-        <p>
-          👤 <strong>Uğur</strong> — <a href="https://kick.com/ugordi" target="_blank" rel="noopener noreferrer">kick.com/ugordi</a> — 📧 bayrak1017@gmail.com
-        </p>
+        <footer className="shop-footer">
+          <p>
+            👤 <strong>Uğur</strong>
+
+            <span>—</span>
+
+            <a
+              href="https://kick.com/ugordi"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              kick.com/ugordi
+            </a>
+
+            <span>—</span>
+
+            📧 bayrak1017@gmail.com
+          </p>
+        </footer>
       </div>
     </div>
   );
