@@ -17,10 +17,15 @@ import {
   getSettings,
   updateSettings,
   applyTax,
+  createWheel,
+  spinWheel,
+  completeWheel,
+  cancelWheel,
 } from "./api";
 
 import Table from "./components/Table";
 import WinnerBox from "./components/WinnerBox";
+import WheelModal from "./components/WheelModal";
 import "./App.css";
 
 const code = new URL(
@@ -47,6 +52,16 @@ function App() {
   const [message, setMessage] = useState("");
   const [loadingAction, setLoadingAction] =
     useState("");
+
+  const [wheelOpen, setWheelOpen] =
+    useState(false);
+
+  const [
+    selectedWheelUser,
+    setSelectedWheelUser,
+  ] = useState(null);
+
+
 
   const fetchPoints = useCallback(async () => {
     if (!streamerId) {
@@ -139,6 +154,44 @@ function App() {
       );
     }
   };
+
+
+
+
+  const handleOpenWheel = (user) => {
+    setSelectedWheelUser(user);
+    setWheelOpen(true);
+    setMessage("");
+  };
+
+  const handleCloseWheel = () => {
+    setWheelOpen(false);
+    setSelectedWheelUser(null);
+  };
+
+  const handleWheelCompleted = async (
+    completedWheel
+  ) => {
+    await fetchPoints();
+
+    const formattedAmount = Number(
+      completedWheel.amount || 0
+    ).toLocaleString("tr-TR");
+
+    const resultMessages = {
+      WIN: `🎉 ${completedWheel.username}, çarktan ${formattedAmount} puan kazandı.`,
+      LOSE: `💀 ${completedWheel.username}, çarkta ${formattedAmount} puan kaybetti.`,
+      HOUSE: `🏦 Kasa kazandı. ${completedWheel.username} kullanıcısından ${formattedAmount} puan alındı.`,
+    };
+
+    setMessage(
+      resultMessages[completedWheel.result] ||
+        "Çark işlemi tamamlandı."
+    );
+
+    handleCloseWheel();
+  };
+
 
   const handleResetPoints = async () => {
     const confirmed = window.confirm(
@@ -705,6 +758,7 @@ function App() {
             <Table
               points={points}
               onUpdate={handleUpdatePoint}
+              onWheel={handleOpenWheel}
             />
           </div>
         </section>
@@ -728,6 +782,18 @@ function App() {
             📧 bayrak1017@gmail.com
           </p>
         </footer>
+
+        <WheelModal
+          open={wheelOpen}
+          user={selectedWheelUser}
+          streamerId={streamerId}
+          onClose={handleCloseWheel}
+          onCompleted={handleWheelCompleted}
+          createWheelRequest={createWheel}
+          spinWheelRequest={spinWheel}
+          completeWheelRequest={completeWheel}
+          cancelWheelRequest={cancelWheel}
+        />
       </div>
     </div>
   );

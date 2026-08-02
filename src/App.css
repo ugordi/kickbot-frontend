@@ -3976,3 +3976,149 @@ input[type="number"]:focus {
     height: 42px;
   }
 }
+
+
+/* =========================================
+   KULLANICI TABLOSU - ÇARK BUTONU
+========================================= */
+
+.table-action-cell {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.table-wheel-button {
+  position: relative;
+  isolation: isolate;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+
+  min-height: 40px;
+  padding: 9px 15px;
+
+  overflow: hidden;
+
+  border: 1px solid rgba(168, 85, 247, 0.34);
+  border-radius: 12px;
+
+  background:
+    linear-gradient(
+      135deg,
+      rgba(124, 58, 237, 0.24),
+      rgba(219, 39, 119, 0.14)
+    );
+
+  color: #ede9fe;
+
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.025em;
+
+  cursor: pointer;
+
+  box-shadow:
+    0 8px 22px rgba(76, 29, 149, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+
+  transition:
+    transform 180ms ease,
+    border-color 180ms ease,
+    background 180ms ease,
+    box-shadow 180ms ease,
+    color 180ms ease;
+}
+
+.table-wheel-button::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+
+  inset: 0;
+
+  background:
+    linear-gradient(
+      120deg,
+      transparent 15%,
+      rgba(255, 255, 255, 0.13) 45%,
+      transparent 72%
+    );
+
+  transform: translateX(-130%);
+  transition: transform 500ms ease;
+}
+
+.table-wheel-button:hover {
+  color: #ffffff;
+
+  border-color:
+    rgba(192, 132, 252, 0.72);
+
+  background:
+    linear-gradient(
+      135deg,
+      rgba(124, 58, 237, 0.42),
+      rgba(219, 39, 119, 0.27)
+    );
+
+  box-shadow:
+    0 13px 32px rgba(109, 40, 217, 0.24),
+    0 0 0 3px rgba(124, 58, 237, 0.07);
+
+  transform: translateY(-2px);
+}
+
+.table-wheel-button:hover::before {
+  transform: translateX(130%);
+}
+
+.table-wheel-button:active {
+  transform: translateY(0) scale(0.98);
+}
+
+.table-wheel-button:focus-visible {
+  outline: none;
+
+  box-shadow:
+    0 0 0 4px rgba(139, 92, 246, 0.18),
+    0 13px 32px rgba(109, 40, 217, 0.24);
+}
+
+.table-wheel-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  font-size: 16px;
+  line-height: 1;
+
+  transition: transform 450ms ease;
+}
+
+.table-wheel-button:hover
+  .table-wheel-icon {
+  transform: rotate(180deg) scale(1.08);
+}
+
+@media (max-width: 640px) {
+  .table-action-cell {
+    justify-content: flex-start;
+  }
+
+  .table-wheel-button {
+    min-height: 36px;
+    padding: 8px 11px;
+
+    font-size: 11px;
+  }
+
+  .table-wheel-icon {
+    font-size: 14px;
+  }
+}
