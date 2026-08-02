@@ -108,8 +108,7 @@ export const createWheel = (
       streamer_id,
       user_id,
       amount,
-    },
-    getAuthConfig()
+    }
   );
 
 // Çark sonucunu backend'de belirler.
@@ -119,8 +118,7 @@ export const spinWheel = (wheel_id) =>
     `${API_BASE}/wheel/spin`,
     {
       wheel_id,
-    },
-    getAuthConfig()
+    }
   );
 
 // Çark sonucunu kullanıcının puanına uygular.
@@ -131,8 +129,7 @@ export const completeWheel = (
     `${API_BASE}/wheel/complete`,
     {
       wheel_id,
-    },
-    getAuthConfig()
+    }
   );
 
 // Çarkı iptal eder.
@@ -142,8 +139,7 @@ export const cancelWheel = (wheel_id) =>
     `${API_BASE}/wheel/cancel`,
     {
       wheel_id,
-    },
-    getAuthConfig()
+    }
   );
 
 // Çark geçmişini getirir.
@@ -151,6 +147,5 @@ export const getWheelHistory = (
   streamer_id
 ) =>
   axios.get(
-    `${API_BASE}/wheel/history/${streamer_id}`,
-    getAuthConfig()
+    `${API_BASE}/wheel/history/${streamer_id}`
   );
