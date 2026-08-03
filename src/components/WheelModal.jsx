@@ -11,53 +11,52 @@ import {
 import "./WheelModal.css";
 
 const SPIN_DURATION_MS = 8000;
+const STATUS_POLL_INTERVAL_MS = 2000;
 
+/*
+ * Çarkın fiziksel olarak durabileceği üç sonuç.
+ */
 const RESULT_CONFIG = {
   WIN: {
-    label: "KAZAN",
-    title: "Büyük Kazanç",
-    description:
-      "Girilen puan kullanıcının hesabına eklenecek.",
+    label: "WIN",
+    title: "Çark WIN Geldi",
     icon: "🏆",
-    effectClass: "wheel-effect-win",
   },
 
   LOSE: {
-    label: "KAYBET",
-    title: "Şans Bu Kez Gülmedi",
-    description:
-      "Girilen puan kullanıcının hesabından düşülecek.",
+    label: "LOSE",
+    title: "Çark LOSE Geldi",
     icon: "💀",
-    effectClass: "wheel-effect-lose",
   },
 
   HOUSE: {
     label: "KASA",
     title: "Kasa Kazandı",
-    description:
-      "Girilen puan kullanıcının hesabından düşülecek.",
     icon: "🏦",
-    effectClass: "wheel-effect-house",
   },
 };
 
 /*
-  Çark segmentleri:
+ * Kullanıcının seçtiği taraf.
+ */
+const CHOICE_CONFIG = {
+  WIN: {
+    label: "WIN",
+    icon: "🏆",
+  },
 
-  WIN:
-  -60° ile 60° arasında
-  merkez: 0°
+  LOSE: {
+    label: "LOSE",
+    icon: "💀",
+  },
+};
 
-  LOSE:
-  60° ile 180° arasında
-  merkez: 120°
-
-  HOUSE:
-  180° ile 300° arasında
-  merkez: 240°
-
-  Pointer yukarıda olduğu için segmenti pointer'a getiren dönüş:
-*/
+/*
+ * Çarkın segment merkezleri.
+ *
+ * Pointer yukarıda olduğu için sonucu pointer'a getiren
+ * nihai dönüş açıları bunlardır.
+ */
 const RESULT_TARGET_ROTATION = {
   WIN: 0,
   LOSE: 240,
@@ -70,9 +69,15 @@ const CONFETTI_ITEMS = Array.from(
     id: index,
     left: `${(index * 37) % 100}%`,
     delay: `${(index % 13) * 0.07}s`,
-    duration: `${2.2 + (index % 7) * 0.18}s`,
-    rotation: `${(index * 53) % 360}deg`,
-    size: `${5 + (index % 5) * 2}px`,
+    duration: `${
+      2.2 + (index % 7) * 0.18
+    }s`,
+    rotation: `${
+      (index * 53) % 360
+    }deg`,
+    size: `${
+      5 + (index % 5) * 2
+    }px`,
   })
 );
 
@@ -82,8 +87,12 @@ const EMBER_ITEMS = Array.from(
     id: index,
     left: `${(index * 41) % 100}%`,
     delay: `${(index % 10) * 0.09}s`,
-    duration: `${1.7 + (index % 6) * 0.2}s`,
-    size: `${4 + (index % 4) * 2}px`,
+    duration: `${
+      1.7 + (index % 6) * 0.2
+    }s`,
+    size: `${
+      4 + (index % 4) * 2
+    }px`,
   })
 );
 
@@ -93,39 +102,64 @@ function WheelModal({
   streamerId,
   onClose,
   onCompleted,
+
   createWheelRequest,
+  getWheelStatusRequest,
   spinWheelRequest,
   completeWheelRequest,
   cancelWheelRequest,
 }) {
   const spinTimerRef = useRef(null);
   const resultTimerRef = useRef(null);
+  const pollingInProgressRef =
+    useRef(false);
 
-  const [amount, setAmount] = useState("");
-  const [session, setSession] = useState(null);
-  const [result, setResult] = useState(null);
+  const [amount, setAmount] =
+    useState("");
 
-  const [rotation, setRotation] = useState(0);
-  const [spinning, setSpinning] = useState(false);
-  const [showResult, setShowResult] = useState(false);
+  const [session, setSession] =
+    useState(null);
 
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+  const [result, setResult] =
+    useState(null);
+
+  const [rotation, setRotation] =
+    useState(0);
+
+  const [spinning, setSpinning] =
+    useState(false);
+
+  const [showResult, setShowResult] =
+    useState(false);
 
   const [effectActive, setEffectActive] =
     useState(false);
+
+  const [loading, setLoading] =
+    useState(false);
+
+  const [polling, setPolling] =
+    useState(false);
+
+  const [error, setError] =
+    useState("");
 
   const currentPoints = Number(
     user?.points || 0
   );
 
-  const numericAmount = Number(amount || 0);
-
-  const formattedCurrentPoints = useMemo(
-    () =>
-      currentPoints.toLocaleString("tr-TR"),
-    [currentPoints]
+  const numericAmount = Number(
+    amount || 0
   );
+
+  const formattedCurrentPoints =
+    useMemo(
+      () =>
+        currentPoints.toLocaleString(
+          "tr-TR"
+        ),
+      [currentPoints]
+    );
 
   const formattedAmount = useMemo(
     () =>
@@ -141,32 +175,107 @@ function WheelModal({
     ? RESULT_CONFIG[result]
     : null;
 
-  const resetModal = useCallback(() => {
-    if (spinTimerRef.current) {
-      window.clearTimeout(
-        spinTimerRef.current
-      );
-    }
+  const userChoice =
+    session?.user_choice || null;
 
-    if (resultTimerRef.current) {
-      window.clearTimeout(
-        resultTimerRef.current
-      );
-    }
+  const choiceConfig = userChoice
+    ? CHOICE_CONFIG[userChoice]
+    : null;
 
-    setAmount("");
-    setSession(null);
-    setResult(null);
+  /*
+   * Kullanıcı yalnızca:
+   *
+   * WIN seçti + WIN geldi
+   * LOSE seçti + LOSE geldi
+   *
+   * durumlarında kazanır.
+   *
+   * HOUSE her durumda kayıptır.
+   */
+  const userWon = Boolean(
+    result &&
+      userChoice &&
+      result !== "HOUSE" &&
+      result === userChoice
+  );
 
-    setRotation(0);
-    setSpinning(false);
-    setShowResult(false);
+  const resultDescription =
+    useMemo(() => {
+      if (!result || !userChoice) {
+        return "";
+      }
 
-    setLoading(false);
-    setError("");
-    setEffectActive(false);
-  }, []);
+      if (userWon) {
+        return `${userChoice} tarafını doğru seçti. Girilen puan kullanıcının hesabına eklenecek.`;
+      }
 
+      if (result === "HOUSE") {
+        return "Kasa kazandı. Girilen puan kullanıcının hesabından düşülecek.";
+      }
+
+      return `${userChoice} tarafı seçildi fakat çark ${result} geldi. Girilen puan kullanıcının hesabından düşülecek.`;
+    }, [
+      result,
+      userChoice,
+      userWon,
+    ]);
+
+  /*
+   * Efekt raw çark sonucuna göre değil,
+   * gerçek kullanıcı sonucuna göre belirleniyor.
+   */
+  const shellEffectClass =
+    showResult && result
+      ? userWon
+        ? "wheel-effect-win"
+        : result === "HOUSE"
+          ? "wheel-effect-house"
+          : "wheel-effect-lose"
+      : "";
+
+  const clearTimers =
+    useCallback(() => {
+      if (spinTimerRef.current) {
+        window.clearTimeout(
+          spinTimerRef.current
+        );
+
+        spinTimerRef.current = null;
+      }
+
+      if (resultTimerRef.current) {
+        window.clearTimeout(
+          resultTimerRef.current
+        );
+
+        resultTimerRef.current = null;
+      }
+    }, []);
+
+  const resetModal =
+    useCallback(() => {
+      clearTimers();
+
+      pollingInProgressRef.current =
+        false;
+
+      setAmount("");
+      setSession(null);
+      setResult(null);
+
+      setRotation(0);
+      setSpinning(false);
+      setShowResult(false);
+      setEffectActive(false);
+
+      setLoading(false);
+      setPolling(false);
+      setError("");
+    }, [clearTimers]);
+
+  /*
+   * Modal her yeni kullanıcı için açıldığında temizlenir.
+   */
   useEffect(() => {
     if (!open) {
       return;
@@ -179,6 +288,9 @@ function WheelModal({
     resetModal,
   ]);
 
+  /*
+   * Modal açıkken arka sayfanın kaymasını engeller.
+   */
   useEffect(() => {
     if (!open) {
       return undefined;
@@ -195,11 +307,150 @@ function WheelModal({
     };
   }, [open]);
 
+  /*
+   * Component kapanırken açık timerları temizler.
+   */
+  useEffect(
+    () => () => {
+      clearTimers();
+    },
+    [clearTimers]
+  );
+
+  /*
+   * Kullanıcının chatten yaptığı seçimi kontrol eder.
+   *
+   * Yalnızca WAITING_CHOICE durumunda çalışır.
+   * Backend READY döndürdüğünde polling otomatik durur.
+   */
+  useEffect(() => {
+    if (
+      !open ||
+      !session?.id ||
+      session.status !==
+        "WAITING_CHOICE" ||
+      typeof getWheelStatusRequest !==
+        "function"
+    ) {
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    const checkWheelStatus =
+      async () => {
+        if (
+          pollingInProgressRef.current
+        ) {
+          return;
+        }
+
+        pollingInProgressRef.current =
+          true;
+
+        setPolling(true);
+
+        try {
+          const response =
+            await getWheelStatusRequest(
+              session.id
+            );
+
+          if (cancelled) {
+            return;
+          }
+
+          const updatedWheel =
+            response.data?.wheel;
+
+          if (!updatedWheel) {
+            return;
+          }
+
+          setSession(
+            (currentSession) => ({
+              ...currentSession,
+              ...updatedWheel,
+            })
+          );
+
+          if (
+            updatedWheel.status ===
+            "READY"
+          ) {
+            setError("");
+          }
+
+          if (
+            updatedWheel.status ===
+            "CANCELLED"
+          ) {
+            setError(
+              "Bu çark işlemi iptal edildi."
+            );
+          }
+
+          if (
+            updatedWheel.status ===
+              "SPUN" &&
+            updatedWheel.result
+          ) {
+            setResult(
+              updatedWheel.result
+            );
+          }
+        } catch (requestError) {
+          if (!cancelled) {
+            console.error(
+              "Çark durumu kontrol edilemedi:",
+              requestError
+            );
+          }
+        } finally {
+          pollingInProgressRef.current =
+            false;
+
+          if (!cancelled) {
+            setPolling(false);
+          }
+        }
+      };
+
+    checkWheelStatus();
+
+    const intervalId =
+      window.setInterval(
+        checkWheelStatus,
+        STATUS_POLL_INTERVAL_MS
+      );
+
+    return () => {
+      cancelled = true;
+
+      window.clearInterval(
+        intervalId
+      );
+
+      pollingInProgressRef.current =
+        false;
+
+      setPolling(false);
+    };
+  }, [
+    open,
+    session?.id,
+    session?.status,
+    getWheelStatusRequest,
+  ]);
+
   const validateAmount = () => {
-    const parsedAmount = Number(amount);
+    const parsedAmount =
+      Number(amount);
 
     if (
-      !Number.isSafeInteger(parsedAmount) ||
+      !Number.isSafeInteger(
+        parsedAmount
+      ) ||
       parsedAmount <= 0
     ) {
       setError(
@@ -209,7 +460,10 @@ function WheelModal({
       return null;
     }
 
-    if (parsedAmount > currentPoints) {
+    if (
+      parsedAmount >
+      currentPoints
+    ) {
       setError(
         "Kullanıcının yeterli puanı bulunmuyor."
       );
@@ -220,8 +474,15 @@ function WheelModal({
     return parsedAmount;
   };
 
+  /*
+   * Çarkı oluşturur.
+   *
+   * Backend WAITING_CHOICE döndürür.
+   * Bundan sonra seçilen kullanıcı chatten !win veya !lose yazmalıdır.
+   */
   const prepareWheel = async () => {
-    const validAmount = validateAmount();
+    const validAmount =
+      validateAmount();
 
     if (!validAmount) {
       return;
@@ -238,10 +499,21 @@ function WheelModal({
           validAmount
         );
 
-      setSession(response.data.wheel);
+      const createdWheel =
+        response.data?.wheel;
+
+      if (!createdWheel?.id) {
+        throw new Error(
+          "Sunucu geçerli bir çark oturumu döndürmedi."
+        );
+      }
+
+      setSession(createdWheel);
     } catch (requestError) {
       setError(
-        requestError.response?.data?.error ||
+        requestError.response?.data
+          ?.error ||
+          requestError.message ||
           "Çark hazırlanamadı."
       );
     } finally {
@@ -249,9 +521,17 @@ function WheelModal({
     }
   };
 
+  /*
+   * READY durumundaki çarkı döndürür.
+   *
+   * Backend sonucu hemen döndürür fakat görsel animasyon
+   * 8 saniye boyunca devam eder.
+   */
   const spinWheel = async () => {
     if (
       !session?.id ||
+      session.status !== "READY" ||
+      !session.user_choice ||
       spinning ||
       loading ||
       result
@@ -266,18 +546,33 @@ function WheelModal({
       setSpinning(true);
 
       const response =
-        await spinWheelRequest(session.id);
+        await spinWheelRequest(
+          session.id
+        );
+
+      const updatedWheel =
+        response.data?.wheel;
 
       const backendResult =
-        response.data?.wheel?.result;
+        updatedWheel?.result;
 
       if (
-        !RESULT_CONFIG[backendResult]
+        !RESULT_CONFIG[
+          backendResult
+        ]
       ) {
         throw new Error(
           "Sunucu geçersiz bir çark sonucu döndürdü."
         );
       }
+
+      setSession(
+        (currentSession) => ({
+          ...currentSession,
+          ...updatedWheel,
+          status: "SPUN",
+        })
+      );
 
       setResult(backendResult);
 
@@ -287,13 +582,15 @@ function WheelModal({
         ];
 
       /*
-        10 tam tur + sonuç açısı.
-        Ufak sapma segmentin içinden çıkmayacak
-        şekilde yalnızca görsel doğallık sağlar.
-      */
+       * 10 tam tur + hedef segment açısı.
+       *
+       * Ufak sapma yalnızca görsel doğallık sağlar ve
+       * pointerın segment dışına çıkmaması için sınırlıdır.
+       */
       const safeOffset =
-        Math.floor(Math.random() * 31) -
-        15;
+        Math.floor(
+          Math.random() * 31
+        ) - 15;
 
       const totalRotation =
         rotation +
@@ -301,9 +598,13 @@ function WheelModal({
         baseRotation +
         safeOffset;
 
-      window.requestAnimationFrame(() => {
-        setRotation(totalRotation);
-      });
+      window.requestAnimationFrame(
+        () => {
+          setRotation(
+            totalRotation
+          );
+        }
+      );
 
       spinTimerRef.current =
         window.setTimeout(() => {
@@ -311,92 +612,152 @@ function WheelModal({
           setShowResult(true);
 
           resultTimerRef.current =
-            window.setTimeout(() => {
-              setEffectActive(true);
-            }, 120);
+            window.setTimeout(
+              () => {
+                setEffectActive(true);
+              },
+              120
+            );
         }, SPIN_DURATION_MS);
     } catch (requestError) {
       setSpinning(false);
 
       setError(
-        requestError.response?.data?.error ||
+        requestError.response?.data
+          ?.error ||
           requestError.message ||
           "Çark çevrilemedi."
       );
     }
   };
 
-  const completeWheel = async () => {
-    if (
-      !session?.id ||
-      !result ||
-      spinning ||
-      loading
-    ) {
-      return;
-    }
-
-    try {
-      setLoading(true);
-      setError("");
-
-      const response =
-        await completeWheelRequest(
-          session.id
-        );
-
-      onCompleted(response.data.wheel);
-    } catch (requestError) {
-      setError(
-        requestError.response?.data?.error ||
-          "Çark işlemi tamamlanamadı."
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const cancelWheel = async () => {
-    if (spinning) {
-      setError(
-        "Çark dönerken işlem iptal edilemez."
-      );
-
-      return;
-    }
-
-    try {
-      setLoading(true);
-      setError("");
-
-      if (session?.id) {
-        await cancelWheelRequest(
-          session.id
-        );
+  /*
+   * Sonucu puan hesabına uygular.
+   */
+  const completeWheel =
+    async () => {
+      if (
+        !session?.id ||
+        !result ||
+        spinning ||
+        loading
+      ) {
+        return;
       }
 
-      resetModal();
-      onClose();
-    } catch (requestError) {
-      setError(
-        requestError.response?.data?.error ||
-          "Çark işlemi iptal edilemedi."
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
+      try {
+        setLoading(true);
+        setError("");
 
-  const handleClose = useCallback(
-    async () => {
+        const response =
+          await completeWheelRequest(
+            session.id
+          );
+
+        const completedWheel =
+          response.data?.wheel;
+
+        if (!completedWheel) {
+          throw new Error(
+            "Sunucu tamamlanan çark bilgisini döndürmedi."
+          );
+        }
+
+        setSession(
+          (currentSession) => ({
+            ...currentSession,
+            ...completedWheel,
+            status: "COMPLETED",
+          })
+        );
+
+        onCompleted(
+          completedWheel
+        );
+      } catch (requestError) {
+        setError(
+          requestError.response?.data
+            ?.error ||
+            requestError.message ||
+            "Çark işlemi tamamlanamadı."
+        );
+      } finally {
+        setLoading(false);
+      }
+    };
+
+  /*
+   * Açık çarkı iptal eder.
+   *
+   * Çark dönerken iptal edilmez.
+   */
+  const cancelWheel =
+    useCallback(async () => {
+      if (spinning) {
+        setError(
+          "Çark dönerken işlem iptal edilemez."
+        );
+
+        return false;
+      }
+
+      try {
+        setLoading(true);
+        setError("");
+
+        if (
+          session?.id &&
+          session.status !==
+            "COMPLETED" &&
+          session.status !==
+            "CANCELLED"
+        ) {
+          await cancelWheelRequest(
+            session.id
+          );
+        }
+
+        resetModal();
+        onClose();
+
+        return true;
+      } catch (requestError) {
+        setError(
+          requestError.response?.data
+            ?.error ||
+            requestError.message ||
+            "Çark işlemi iptal edilemedi."
+        );
+
+        return false;
+      } finally {
+        setLoading(false);
+      }
+    }, [
+      spinning,
+      session,
+      cancelWheelRequest,
+      resetModal,
+      onClose,
+    ]);
+
+  /*
+   * X, Escape veya dış alana tıklama.
+   *
+   * Açık işlem varsa önce backend tarafında iptal edilir.
+   */
+  const handleClose =
+    useCallback(async () => {
       if (loading || spinning) {
         return;
       }
 
       if (
         session?.id &&
-        session.status !== "COMPLETED" &&
-        session.status !== "CANCELLED"
+        session.status !==
+          "COMPLETED" &&
+        session.status !==
+          "CANCELLED"
       ) {
         await cancelWheel();
         return;
@@ -404,23 +765,29 @@ function WheelModal({
 
       resetModal();
       onClose();
-    },
-    [
+    }, [
       loading,
       spinning,
       session,
-      onClose,
+      cancelWheel,
       resetModal,
-    ]
-  );
+      onClose,
+    ]);
 
+  /*
+   * Escape ile kapatma.
+   */
   useEffect(() => {
     if (!open) {
       return undefined;
     }
 
-    const handleKeyDown = (event) => {
-      if (event.key === "Escape") {
+    const handleKeyDown = (
+      event
+    ) => {
+      if (
+        event.key === "Escape"
+      ) {
         handleClose();
       }
     };
@@ -442,10 +809,19 @@ function WheelModal({
     return null;
   }
 
-  const setQuickAmount = (value) => {
+  const setQuickAmount = (
+    value
+  ) => {
     setAmount(String(value));
     setError("");
   };
+
+  const isWaitingChoice =
+    session?.status ===
+    "WAITING_CHOICE";
+
+  const isReady =
+    session?.status === "READY";
 
   return (
     <div
@@ -463,11 +839,7 @@ function WheelModal({
       <div className="wheel-modal-background-grid" />
 
       <section
-        className={`wheel-modal-shell ${
-          resultConfig && showResult
-            ? resultConfig.effectClass
-            : ""
-        }`}
+        className={`wheel-modal-shell ${shellEffectClass}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby="wheel-modal-title"
@@ -475,8 +847,9 @@ function WheelModal({
         <div className="wheel-modal-orb wheel-modal-orb-one" />
         <div className="wheel-modal-orb wheel-modal-orb-two" />
 
+        {/* Kullanıcı gerçekten kazandıysa konfeti */}
         {effectActive &&
-          result === "WIN" && (
+          userWon && (
             <div className="wheel-confetti-layer">
               {CONFETTI_ITEMS.map(
                 (item) => (
@@ -502,29 +875,35 @@ function WheelModal({
             </div>
           )}
 
+        {/* Yanlış tahminde kırmızı kaybetme efekti */}
         {effectActive &&
-          result === "LOSE" && (
+          !userWon &&
+          result &&
+          result !== "HOUSE" && (
             <div className="wheel-lose-effect-layer">
               <div className="wheel-lose-vignette" />
 
-              {EMBER_ITEMS.map((item) => (
-                <span
-                  key={item.id}
-                  className="wheel-dark-ember"
-                  style={{
-                    left: item.left,
-                    animationDelay:
-                      item.delay,
-                    animationDuration:
-                      item.duration,
-                    width: item.size,
-                    height: item.size,
-                  }}
-                />
-              ))}
+              {EMBER_ITEMS.map(
+                (item) => (
+                  <span
+                    key={item.id}
+                    className="wheel-dark-ember"
+                    style={{
+                      left: item.left,
+                      animationDelay:
+                        item.delay,
+                      animationDuration:
+                        item.duration,
+                      width: item.size,
+                      height: item.size,
+                    }}
+                  />
+                )
+              )}
             </div>
           )}
 
+        {/* HOUSE gelirse kasa efekti */}
         {effectActive &&
           result === "HOUSE" && (
             <div className="wheel-house-effect-layer">
@@ -535,16 +914,19 @@ function WheelModal({
               <div className="wheel-house-coins">
                 {Array.from({
                   length: 18,
-                }).map((_, index) => (
-                  <span
-                    key={index}
-                    style={{
-                      "--coin-index": index,
-                    }}
-                  >
-                    $
-                  </span>
-                ))}
+                }).map(
+                  (_, index) => (
+                    <span
+                      key={index}
+                      style={{
+                        "--coin-index":
+                          index,
+                      }}
+                    >
+                      $
+                    </span>
+                  )
+                )}
               </div>
             </div>
           )}
@@ -617,6 +999,7 @@ function WheelModal({
         </div>
 
         <div className="wheel-modal-main">
+          {/* ÇARK GÖRSELİ */}
           <div className="wheel-visual-column">
             <div
               className={`wheel-stage ${
@@ -629,7 +1012,6 @@ function WheelModal({
 
               <div className="wheel-pointer-container">
                 <div className="wheel-pointer-light" />
-
                 <div className="wheel-pointer" />
               </div>
 
@@ -637,16 +1019,21 @@ function WheelModal({
                 <div className="wheel-frame-lights">
                   {Array.from({
                     length: 24,
-                  }).map((_, index) => (
-                    <span
-                      key={index}
-                      style={{
-                        transform: `rotate(${
-                          index * 15
-                        }deg) translateY(-196px)`,
-                      }}
-                    />
-                  ))}
+                  }).map(
+                    (_, index) => (
+                      <span
+                        key={index}
+                        style={{
+                          transform:
+                            `rotate(${
+                              index *
+                              15
+                            }deg) ` +
+                            "translateY(-196px)",
+                        }}
+                      />
+                    )
+                  )}
                 </div>
 
                 <div
@@ -656,7 +1043,9 @@ function WheelModal({
                       : ""
                   }`}
                   style={{
-                    transform: `rotate(${rotation}deg)`,
+                    transform:
+                      `rotate(${rotation}deg)`,
+
                     transitionDuration:
                       spinning
                         ? `${SPIN_DURATION_MS}ms`
@@ -667,14 +1056,14 @@ function WheelModal({
 
                   <div className="wheel-label wheel-label-win">
                     <span>🏆</span>
-                    <strong>KAZAN</strong>
-                    <small>+ PUAN</small>
+                    <strong>WIN</strong>
+                    <small>KAZAN</small>
                   </div>
 
                   <div className="wheel-label wheel-label-lose">
                     <span>💀</span>
-                    <strong>KAYBET</strong>
-                    <small>- PUAN</small>
+                    <strong>LOSE</strong>
+                    <small>KAYBET</small>
                   </div>
 
                   <div className="wheel-label wheel-label-house">
@@ -704,7 +1093,9 @@ function WheelModal({
             </div>
           </div>
 
+          {/* SAĞ KONTROL PANELİ */}
           <div className="wheel-control-column">
+            {/* 1. PUAN SEÇİMİ */}
             {!session && (
               <div className="wheel-step-panel">
                 <div className="wheel-step-header">
@@ -738,9 +1129,12 @@ function WheelModal({
                       placeholder="Örn. 5.000"
                       disabled={loading}
                       autoFocus
-                      onChange={(event) => {
+                      onChange={(
+                        event
+                      ) => {
                         setAmount(
-                          event.target.value
+                          event.target
+                            .value
                         );
 
                         setError("");
@@ -752,28 +1146,30 @@ function WheelModal({
                 </label>
 
                 <div className="wheel-quick-amounts">
-                  {[1000, 5000, 10000].map(
-                    (value) => (
-                      <button
-                        key={value}
-                        type="button"
-                        disabled={
-                          loading ||
-                          value >
-                            currentPoints
-                        }
-                        onClick={() =>
-                          setQuickAmount(
-                            value
-                          )
-                        }
-                      >
-                        {value.toLocaleString(
-                          "tr-TR"
-                        )}
-                      </button>
-                    )
-                  )}
+                  {[
+                    1000,
+                    5000,
+                    10000,
+                  ].map((value) => (
+                    <button
+                      key={value}
+                      type="button"
+                      disabled={
+                        loading ||
+                        value >
+                          currentPoints
+                      }
+                      onClick={() =>
+                        setQuickAmount(
+                          value
+                        )
+                      }
+                    >
+                      {value.toLocaleString(
+                        "tr-TR"
+                      )}
+                    </button>
+                  ))}
 
                   <button
                     type="button"
@@ -794,13 +1190,13 @@ function WheelModal({
                 <div className="wheel-chance-grid">
                   <div className="wheel-chance-win">
                     <span>🏆</span>
-                    <small>Kazan</small>
+                    <small>WIN</small>
                     <strong>%33,3</strong>
                   </div>
 
                   <div className="wheel-chance-lose">
                     <span>💀</span>
-                    <small>Kaybet</small>
+                    <small>LOSE</small>
                     <strong>%33,3</strong>
                   </div>
 
@@ -832,94 +1228,268 @@ function WheelModal({
               </div>
             )}
 
-            {session && !result && (
-              <div className="wheel-step-panel wheel-ready-panel">
-                <div className="wheel-step-header">
-                  <span className="wheel-step-number">
-                    02
-                  </span>
-
-                  <div>
-                    <small>
-                      Çark hazır
-                    </small>
-
-                    <h3>
-                      Şansını dene
-                    </h3>
-                  </div>
-                </div>
-
-                <div className="wheel-ready-card">
-                  <div className="wheel-ready-user">
-                    <span>👤</span>
+            {/* 2. CHAT SEÇİMİ BEKLENİYOR */}
+            {session &&
+              !result &&
+              isWaitingChoice && (
+                <div className="wheel-step-panel wheel-ready-panel">
+                  <div className="wheel-step-header">
+                    <span className="wheel-step-number">
+                      02
+                    </span>
 
                     <div>
                       <small>
-                        Kullanıcı
+                        Chat seçimi
+                      </small>
+
+                      <h3>
+                        Kullanıcı bekleniyor
+                      </h3>
+                    </div>
+                  </div>
+
+                  <div className="wheel-ready-card">
+                    <div className="wheel-ready-user">
+                      <span>👤</span>
+
+                      <div>
+                        <small>
+                          Seçim yapacak
+                        </small>
+
+                        <strong>
+                          @{user.username}
+                        </strong>
+                      </div>
+                    </div>
+
+                    <div className="wheel-ready-amount">
+                      <small>
+                        İşlem miktarı
                       </small>
 
                       <strong>
+                        {formattedAmount}
+                      </strong>
+
+                      <span>
+                        PUAN
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="wheel-spinning-status">
+                    <div className="wheel-spinning-orbit">
+                      <span />
+                      <span />
+                      <span />
+                    </div>
+
+                    <small>
+                      Chat dinleniyor
+                    </small>
+
+                    <h3>
+                      Seçim bekleniyor
+                    </h3>
+
+                    <p>
+                      Yalnızca{" "}
+                      <strong>
                         @{user.username}
+                      </strong>{" "}
+                      seçim yapabilir.
+                    </p>
+                  </div>
+
+                  <div className="wheel-chance-grid">
+                    <div className="wheel-chance-win">
+                      <span>🏆</span>
+                      <small>
+                        Chate yaz
+                      </small>
+                      <strong>
+                        !win
+                      </strong>
+                    </div>
+
+                    <div className="wheel-chance-lose">
+                      <span>💀</span>
+                      <small>
+                        Chate yaz
+                      </small>
+                      <strong>
+                        !lose
+                      </strong>
+                    </div>
+
+                    <div className="wheel-chance-house">
+                      <span>🔄</span>
+                      <small>
+                        Kontrol
+                      </small>
+                      <strong>
+                        {polling
+                          ? "Bakılıyor"
+                          : "Aktif"}
                       </strong>
                     </div>
                   </div>
 
-                  <div className="wheel-ready-amount">
-                    <small>
-                      İşlem miktarı
-                    </small>
-
+                  <p className="wheel-ready-description">
+                    Kullanıcı Kick
+                    chatine yalnızca{" "}
                     <strong>
-                      {formattedAmount}
-                    </strong>
+                      !win
+                    </strong>{" "}
+                    veya{" "}
+                    <strong>
+                      !lose
+                    </strong>{" "}
+                    yazmalıdır. Puan
+                    eklememelidir.
+                  </p>
 
-                    <span>PUAN</span>
-                  </div>
+                  <button
+                    type="button"
+                    className="wheel-soft-cancel-button"
+                    disabled={loading}
+                    onClick={cancelWheel}
+                  >
+                    İşlemi iptal et
+                  </button>
                 </div>
+              )}
 
-                <p className="wheel-ready-description">
-                  Sonuç sunucu tarafından
-                  güvenli şekilde belirlenecek.
-                  Çark yaklaşık 8 saniye
-                  boyunca dönecek.
-                </p>
+            {/* 3. SEÇİM GELDİ, ÇARK HAZIR */}
+            {session &&
+              !result &&
+              isReady && (
+                <div className="wheel-step-panel wheel-ready-panel">
+                  <div className="wheel-step-header">
+                    <span className="wheel-step-number">
+                      03
+                    </span>
 
-                <button
-                  type="button"
-                  className="wheel-spin-button"
-                  disabled={
-                    spinning || loading
-                  }
-                  onClick={spinWheel}
-                >
-                  <span className="wheel-spin-icon">
-                    🎡
-                  </span>
+                    <div>
+                      <small>
+                        Seçim tamamlandı
+                      </small>
 
-                  ÇARKI ÇEVİR
-                </button>
+                      <h3>
+                        Çark çevrilebilir
+                      </h3>
+                    </div>
+                  </div>
 
-                <button
-                  type="button"
-                  className="wheel-soft-cancel-button"
-                  disabled={
-                    spinning || loading
-                  }
-                  onClick={cancelWheel}
-                >
-                  İşlemi iptal et
-                </button>
-              </div>
-            )}
+                  <div className="wheel-ready-card">
+                    <div className="wheel-ready-user">
+                      <span>
+                        {choiceConfig?.icon ||
+                          "🎯"}
+                      </span>
 
+                      <div>
+                        <small>
+                          Kullanıcının seçimi
+                        </small>
+
+                        <strong>
+                          @{user.username}
+                        </strong>
+                      </div>
+                    </div>
+
+                    <div className="wheel-ready-amount">
+                      <small>
+                        Seçilen taraf
+                      </small>
+
+                      <strong>
+                        {choiceConfig?.label}
+                      </strong>
+                    </div>
+                  </div>
+
+                  <div className="wheel-result-summary">
+                    <div>
+                      <small>
+                        Risk miktarı
+                      </small>
+
+                      <strong>
+                        {formattedAmount}
+                      </strong>
+
+                      <span>PUAN</span>
+                    </div>
+
+                    <div>
+                      <small>
+                        Durum
+                      </small>
+
+                      <strong>
+                        SEÇİM ALINDI
+                      </strong>
+                    </div>
+                  </div>
+
+                  <p className="wheel-ready-description">
+                    Kullanıcı{" "}
+                    <strong>
+                      {choiceConfig?.label}
+                    </strong>{" "}
+                    tarafını seçti. Aynı
+                    taraf gelirse kazanacak;
+                    farklı sonuç veya KASA
+                    gelirse kaybedecek.
+                  </p>
+
+                  <button
+                    type="button"
+                    className="wheel-spin-button"
+                    disabled={
+                      spinning || loading
+                    }
+                    onClick={spinWheel}
+                  >
+                    <span className="wheel-spin-icon">
+                      🎡
+                    </span>
+
+                    ÇARKI ÇEVİR
+                  </button>
+
+                  <button
+                    type="button"
+                    className="wheel-soft-cancel-button"
+                    disabled={
+                      spinning || loading
+                    }
+                    onClick={cancelWheel}
+                  >
+                    İşlemi iptal et
+                  </button>
+                </div>
+              )}
+
+            {/* 4. ÇARK SONUCU */}
             {resultConfig && (
               <div
                 className={`wheel-result-panel ${
                   showResult
                     ? "wheel-result-panel-visible"
                     : ""
-                } wheel-result-panel-${result.toLowerCase()}`}
+                } wheel-result-panel-${
+                  userWon
+                    ? "win"
+                    : result ===
+                        "HOUSE"
+                      ? "house"
+                      : "lose"
+                }`}
               >
                 {spinning ? (
                   <div className="wheel-spinning-status">
@@ -938,14 +1508,17 @@ function WheelModal({
                     </h3>
 
                     <p>
-                      Şans, son dönüşünü
-                      yapıyor.
+                      Çark yaklaşık 8
+                      saniye boyunca
+                      dönecek.
                     </p>
                   </div>
                 ) : (
                   <>
                     <div className="wheel-result-symbol">
-                      {resultConfig.icon}
+                      {userWon
+                        ? "🎉"
+                        : resultConfig.icon}
                     </div>
 
                     <small className="wheel-result-eyebrow">
@@ -957,23 +1530,31 @@ function WheelModal({
                     </h3>
 
                     <strong className="wheel-result-name">
-                      {resultConfig.label}
+                      {result}
                     </strong>
 
                     <p>
-                      {
-                        resultConfig.description
-                      }
+                      {resultDescription}
                     </p>
 
                     <div className="wheel-result-summary">
                       <div>
                         <small>
-                          Kullanıcı
+                          Kullanıcının seçimi
                         </small>
 
                         <strong>
-                          @{user.username}
+                          {userChoice}
+                        </strong>
+                      </div>
+
+                      <div>
+                        <small>
+                          Çarkın sonucu
+                        </small>
+
+                        <strong>
+                          {result}
                         </strong>
                       </div>
 
@@ -986,7 +1567,21 @@ function WheelModal({
                           {formattedAmount}
                         </strong>
 
-                        <span>PUAN</span>
+                        <span>
+                          PUAN
+                        </span>
+                      </div>
+
+                      <div>
+                        <small>
+                          Nihai durum
+                        </small>
+
+                        <strong>
+                          {userWon
+                            ? "KAZANDI"
+                            : "KAYBETTİ"}
+                        </strong>
                       </div>
                     </div>
 
@@ -1023,7 +1618,6 @@ function WheelModal({
             {error && (
               <div className="wheel-error-box">
                 <span>!</span>
-
                 <p>{error}</p>
               </div>
             )}
@@ -1032,10 +1626,12 @@ function WheelModal({
               <span>🔒</span>
 
               <p>
-                Sonuç backend tarafından
+                Kullanıcının seçimi chat
+                üzerinden alınır. Çark
+                sonucu backend tarafından
                 belirlenir. Puan yalnızca
-                “İşlemi Tamamla” seçildiğinde
-                güncellenir.
+                “İşlemi Tamamla”
+                seçildiğinde güncellenir.
               </p>
             </div>
           </div>

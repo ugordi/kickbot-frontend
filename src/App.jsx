@@ -21,6 +21,7 @@ import {
   spinWheel,
   completeWheel,
   cancelWheel,
+  getWheelStatus,
 } from "./api";
 
 import Table from "./components/Table";
@@ -178,17 +179,37 @@ function App() {
       completedWheel.amount || 0
     ).toLocaleString("tr-TR");
 
-    const resultMessages = {
-      WIN: `🎉 ${completedWheel.username}, çarktan ${formattedAmount} puan kazandı.`,
-      LOSE: `💀 ${completedWheel.username}, çarkta ${formattedAmount} puan kaybetti.`,
-      HOUSE: `🏦 Kasa kazandı. ${completedWheel.username} kullanıcısından ${formattedAmount} puan alındı.`,
-    };
+    const username =
+      completedWheel.username ||
+      selectedWheelUser?.username ||
+      "Kullanıcı";
 
-    setMessage(
-      resultMessages[completedWheel.result] ||
-        "Çark işlemi tamamlandı."
-    );
+    const userChoice =
+      completedWheel.user_choice;
 
+    const wheelResult =
+      completedWheel.result;
+
+    const userWon =
+      completedWheel.user_won === true;
+
+    let completedMessage;
+
+    if (userWon) {
+      completedMessage =
+        `🎉 ${username}, ${userChoice} tarafını seçti ve doğru bildi! ` +
+        `${formattedAmount} puan kazandı.`;
+    } else if (wheelResult === "HOUSE") {
+      completedMessage =
+        `🏦 Kasa kazandı! ${username}, ` +
+        `${formattedAmount} puan kaybetti.`;
+    } else {
+      completedMessage =
+        `💀 ${username}, ${userChoice} tarafını seçti ancak sonuç ` +
+        `${wheelResult} geldi. ${formattedAmount} puan kaybetti.`;
+    }
+
+    setMessage(completedMessage);
     handleCloseWheel();
   };
 
@@ -790,6 +811,7 @@ function App() {
           onClose={handleCloseWheel}
           onCompleted={handleWheelCompleted}
           createWheelRequest={createWheel}
+          getWheelStatusRequest={getWheelStatus}
           spinWheelRequest={spinWheel}
           completeWheelRequest={completeWheel}
           cancelWheelRequest={cancelWheel}
